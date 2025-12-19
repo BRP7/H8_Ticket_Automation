@@ -1,19 +1,24 @@
-import { fetchComplaintEmails } from "./outlook.js";
-import { extractCircuitId } from "./utils.js";
-import { createH8Ticket } from "./h8.js";
+import "dotenv/config";
+import { pollInbox } from "./poller.js";
 
-(async () => {
-  const emails = await fetchComplaintEmails();
+let isRunning = false;
 
-  for (const mail of emails) {
-    const text = `${mail.subject} ${mail.body?.content || ""}`;
-    const circuitId = extractCircuitId(text);
+async function safePoll() {
+  if (isRunning) return;
+  isRunning = true;
 
-    if (!circuitId) continue;
-
-    await createH8Ticket({ circuitId });
-
-    // later:
-    // move email to H8-Processed
+  try {
+    await pollInbox();
+  } catch (err) {
+    console.error("❌ Poll error:", err);
+  } finally {
+    isRunning = false;
   }
-})();
+}
+
+// 🔹 RUN IMMEDIATELY
+console.log("🚀 H8 Automation started");
+safePoll();
+
+// 🔹 THEN RUN EVERY MINUTE
+setInterval(safePoll, 60 * 1000);

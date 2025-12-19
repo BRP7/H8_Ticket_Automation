@@ -28,7 +28,7 @@ const msalConfig = {
 };
 
 const SCOPES = [
-  "https://graph.microsoft.com/Mail.Read",
+  "https://graph.microsoft.com/Mail.ReadWrite",
   "https://graph.microsoft.com/User.Read",
   "offline_access",
 ];

@@ -1,9 +1,27 @@
 import { chromium } from "playwright";
 
-export async function createH8Ticket(circuitId) {
+/**
+ * Create H8 ticket using Playwright (ASP.NET safe)
+ */
+export async function createH8Ticket(data) {
+  const {
+    circuitId,
+    caseReasonCategory,
+    subCategory,
+    subSubCategory,
+    priority,
+    summary,
+  } = data;
+
+  // ✅ Fixed title & description (testing phase)
+  const finalDescription =
+    `This ticket is created for testing purposes only. No action is required.\n\n` +
+    `--- Original Email Content ---\n` +
+    (summary || "No email body available");
+
   const browser = await chromium.launch({
-    headless: false, // MUST be false for H8 (ASP.NET + JS heavy)
-    slowMo: 50,      // helps stability
+    headless: false, // MUST be false for ASP.NET stability
+    slowMo: 50,
   });
 
   const context = await browser.newContext({
@@ -12,114 +30,191 @@ export async function createH8Ticket(circuitId) {
 
   const page = await context.newPage();
 
-  /* =========================
-     1️⃣ LOGIN
-  ========================== */
-  await page.goto("http://admin.optimaltele.net/Login.aspx", {
-    waitUntil: "domcontentloaded",
-    timeout: 60000,
-  });
+  try {
+    /* =========================
+       1️⃣ LOGIN
+    ========================== */
+    await page.goto("http://admin.optimaltele.net/Login.aspx", {
+      waitUntil: "domcontentloaded",
+      timeout: 60000,
+    });
 
-  await page.waitForTimeout(3000);
+    await page.fill("#txtUserName", process.env.H8_USERNAME);
+    await page.fill("#txtPassword", process.env.H8_PASSWORD);
+    await page.click("#save");
 
-  await page.fill("#txtUserName", process.env.H8_USERNAME);
-  await page.fill("#txtPassword", process.env.H8_PASSWORD);
+    // ASP.NET postback
+    await page.waitForTimeout(6000);
 
-  await page.click("#save");
+    /* =========================
+       2️⃣ NEW CASE PAGE
+    ========================== */
+    await page.goto("http://admin.optimaltele.net/NewCase.aspx", {
+      waitUntil: "domcontentloaded",
+      timeout: 60000,
+    });
 
-  // IMPORTANT: ASP.NET postback → DO NOT use networkidle
-  await page.waitForTimeout(6000);
+    await page.waitForTimeout(5000);
 
-  /* =========================
-     2️⃣ GO TO NEW CASE
-  ========================== */
-  await page.goto("http://admin.optimaltele.net/NewCase.aspx", {
-    waitUntil: "domcontentloaded",
-    timeout: 60000,
-  });
+    /* =========================
+       3️⃣ SELECT LEASE ACCOUNT
+    ========================== */
+    await page.waitForSelector("select[id*='ddlAccountnam']", {
+      timeout: 30000,
+    });
 
-  await page.waitForTimeout(5000);
+    await page.evaluate(() => {
+      const ddl = document.querySelector("select[id*='ddlAccountnam']");
+      const option = [...ddl.options].find(
+        o => o.textContent.trim() === "Lease Account"
+      );
+      if (!option) throw new Error("Lease Account option not found");
 
-  /* =========================
-     3️⃣ SELECT "LEASE ACCOUNT"
-     Correct ASP.NET selector
-  ========================== */
-  await page.waitForSelector("select[id*='ddlAccountnam']", {
-    timeout: 20000,
-  });
+      ddl.value = option.value;
+      ddl.dispatchEvent(new Event("change", { bubbles: true }));
+    });
 
-  await page.evaluate(() => {
-    const ddl = document.querySelector("select[id*='ddlAccountnam']");
-    if (!ddl) throw new Error("ddlAccountnam dropdown not found");
+    // Allow ASP.NET UpdatePanel
+    await page.waitForTimeout(5000);
 
-    const option = [...ddl.options].find(
-      (o) => o.textContent.trim() === "Lease Account"
+    /* =========================
+       4️⃣ ENTER CIRCUIT ID
+    ========================== */
+    await page.waitForSelector("input[id*='txtLeasecircuit']", {
+      timeout: 30000,
+    });
+
+    await page.evaluate((circuitId) => {
+      const input = document.querySelector("input[id*='txtLeasecircuit']");
+      input.focus();
+      input.value = circuitId;
+
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+    }, circuitId);
+
+    // Backend lookup
+    await page.waitForTimeout(6000);
+
+    /* =========================
+       5️⃣ DROPDOWNS (ORDER IS CRITICAL)
+    ========================== */
+
+    // Case Reason / Category
+    await selectAndWait(
+      page,
+      "#ContentPlaceHolder1_ddlCategory",
+      caseReasonCategory
     );
 
-    if (!option) throw new Error("Lease Account option not found");
+    // Sub Category (depends on Category)
+    await selectAndWait(
+      page,
+      "#ContentPlaceHolder1_ddlsubCategory",
+      subCategory
+    );
 
-    ddl.value = option.value;
-    ddl.dispatchEvent(new Event("change", { bubbles: true }));
-  });
+    // Sub Sub Category (depends on Sub Category)
+    await selectAndWait(
+      page,
+      "#ContentPlaceHolder1_ddlSubSubCategory",
+      subSubCategory
+    );
 
-  // ASP.NET partial postback delay
-  await page.waitForTimeout(5000);
+    // Priority
+    await selectAndWait(
+      page,
+      "#ContentPlaceHolder1_ddlPriority",
+      priority
+    );
 
-/* =========================
-   4️⃣ WAIT + ENTER CIRCUIT ID
-   (ASP.NET dynamic field)
-========================= */
+    // Status
+//   await selectAndWait(
+//   page,
+//   "#ContentPlaceHolder1_ddlstatus",
+//   "Not Started"
+// );
 
-await page.waitForTimeout(6000); // allow postback to finish
 
-/* =========================
-   4️⃣ WAIT + ENTER CIRCUIT ID
-========================= */
+    /* =========================
+       6️⃣ TITLE & DESCRIPTION
+    ========================== */
+    await page.fill(
+      "#ContentPlaceHolder1_txttitle",
+      "TEST – Fault Ticket Creation"
+    );
 
-await page.waitForTimeout(6000); // let ASP.NET postback finish
+    await page.fill(
+      "#ContentPlaceHolder1_txtDesc",
+      finalDescription
+    );
 
-await page.evaluate((circuitId) => {
-  const input = document.querySelector(
-    "input[id*='txtLeasecircuit']"
+    /* =========================
+       7️⃣ SAVE & READ TICKET ID
+    ========================== */
+    // await page.click("input[id*='btnSave']");
+    await page.click("#ContentPlaceHolder1_btnsave");
+
+
+    await page.waitForSelector(".sweet-alert", { timeout: 20000 });
+
+    const ticketId = await page.evaluate(() => {
+      const tds = [...document.querySelectorAll(".sweet-alert td")];
+      const idx = tds.findIndex(td =>
+        td.textContent.trim().startsWith("Ticket ID")
+      );
+      return idx !== -1 ? tds[idx + 1]?.innerText.trim() : null;
+    });
+
+    await page.click(".sweet-alert button.confirm");
+
+    if (!ticketId) {
+      throw new Error("Ticket ID not found after save");
+    }
+
+    console.log("🎫 Ticket created:", ticketId);
+    return ticketId;
+
+  } finally {
+    // Close later if you want debugging
+    await browser.close();
+  }
+}
+
+/* =====================================================
+   ASP.NET SAFE DROPDOWN SELECT (DO NOT MODIFY)
+===================================================== */
+async function selectAndWait(page, selector, text) {
+  // Wait until dropdown exists
+  await page.waitForSelector(selector, { timeout: 30000 });
+
+  // Wait until ASP.NET populated options
+  await page.waitForFunction(
+    sel => {
+      const el = document.querySelector(sel);
+      return el && el.options.length > 1;
+    },
+    selector,
+    { timeout: 30000 }
   );
 
-  if (!input) {
-    throw new Error("txtLeasecircuit input not found");
-  }
+  // Select by visible text
+  await page.evaluate(({ selector, text }) => {
+    const ddl = document.querySelector(selector);
+    const opt = [...ddl.options].find(
+      o => o.textContent.trim().toLowerCase() === text.toLowerCase()
+    );
 
-  input.focus();
-  input.value = circuitId;
+    if (!opt) {
+      throw new Error(`Option "${text}" not found in ${selector}`);
+    }
 
-  input.dispatchEvent(new Event("input", { bubbles: true }));
-  input.dispatchEvent(new Event("change", { bubbles: true }));
-}, circuitId);
+    ddl.value = opt.value;
 
-// allow backend lookup to auto-fill customer/location
-await page.waitForTimeout(6000);
+    // REQUIRED for ASP.NET UpdatePanel
+    ddl.dispatchEvent(new Event("change", { bubbles: true }));
+  }, { selector, text });
 
-
-  /* =========================
-     5️⃣ REQUIRED FIELDS
-     (safe index-based)
-  ========================== */
-  await page.selectOption("select[id*='ddlCaseReason']", { index: 1 });
-  await page.waitForTimeout(1500);
-
-  await page.selectOption("select[id*='ddlSubCategory']", { index: 1 });
-  await page.waitForTimeout(1500);
-
-  await page.selectOption("select[id*='ddlPriority']", { label: "Medium" });
-  await page.waitForTimeout(1500);
-
-  /* =========================
-     6️⃣ SAVE TICKET
-     (commented for safety)
-  ========================== */
-
-  // await page.click("input[id*='btnSave']");
-  // await page.waitForTimeout(6000);
-
-  console.log(`🎫 H8 ticket flow completed for Circuit ID: ${circuitId}`);
-
-  await browser.close();
+  // ⛔ NOT OPTIONAL
+  await page.waitForTimeout(5000);
 }
