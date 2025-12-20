@@ -6,6 +6,8 @@ import {
   moveToFolder,
 } from "./outlook.js";
 import { logTicket } from "./utils/ticketLogger.js";
+import { withRetry } from "./utils/retry.js";
+import { isRetryableError } from "./utils/errorClassifier.js";
 
 export async function pollInbox() {
   console.log("📩 Poller started...");
@@ -14,20 +16,21 @@ export async function pollInbox() {
   console.log(`📨 Fetched ${emails.length} unread emails`);
 
   for (const mail of emails) {
+    let gptResult = null;
+
     try {
       console.log("🔍 Processing:", mail.subject);
 
       /* =========================
          1️⃣ GPT CLASSIFICATION
       ========================== */
-      
-      const gptResult = await classifyEmailWithGPT({
+      gptResult = await classifyEmailWithGPT({
         subject: mail.subject,
         from: mail.from?.emailAddress?.address,
         body: mail.bodyText,
       });
 
-      console.log("result",gptResult);
+      console.log("result", gptResult);
 
       /* =========================
          2️⃣ NOT A REAL ISSUE
@@ -42,7 +45,8 @@ export async function pollInbox() {
           status: "IGNORED",
         });
 
-        // await markAsRead(mail.id);
+        // Mark read to avoid reprocessing
+        await markAsRead(mail.id);
 
         // Move ONLY if folder exists
         try {
@@ -57,11 +61,30 @@ export async function pollInbox() {
       }
 
       /* =========================
-         3️⃣ CREATE H8 TICKET
+         3️⃣ CREATE H8 TICKET (WITH RETRY)
       ========================== */
       console.log("🛠 Creating H8 ticket...");
 
-      const ticketId = await createH8Ticket(gptResult);
+      const ticketId = await withRetry(
+        async () => {
+          return await createH8Ticket(gptResult);
+        },
+        {
+          retries: 3,
+          delayMs: 7000,
+          onRetry: (err, attempt) => {
+            if (!isRetryableError(err)) {
+              // 🚫 Logical / business errors → stop immediately
+              throw err;
+            }
+
+            console.warn(
+              `🔁 Retry ${attempt} for email ${mail.id}:`,
+              err.message
+            );
+          },
+        }
+      );
 
       console.log("✅ Ticket created:", ticketId);
 
@@ -92,15 +115,18 @@ export async function pollInbox() {
       console.error("❌ Failed:", err.message);
 
       logTicket({
-        circuitId: "UNKNOWN",
+        circuitId: gptResult?.circuitId || "UNKNOWN",
         ticketId: null,
         emailId: mail.id,
-        status: "FAILED",
+        status: isRetryableError(err)
+          ? "FAILED_RETRY_EXHAUSTED"
+          : "FAILED_PERMANENT",
       });
 
-      // DO NOT mark as read → allows retry
+      // 🚫 DO NOT mark as read → allows retry on next poll
+      // 🚫 DO NOT move unless you want manual handling
       try {
-        await moveToFolder(mail.id, "H8-Failed");
+        // await moveToFolder(mail.id, "H8-Failed");
       } catch {
         console.warn(
           "⚠️ Folder H8-Failed not found. Mail left in Inbox for retry."

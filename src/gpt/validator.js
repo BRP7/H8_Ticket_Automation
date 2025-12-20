@@ -9,19 +9,31 @@ import {
 export function validateGPTResult(r) {
   if (!r || typeof r !== "object") return false;
 
+  // no issue → always valid
   if (r.isIssue === false) return true;
 
   if (!r.circuitId) return false;
+
+  // validate case reason
   if (!CASE_REASON.includes(r.caseReasonCategory)) return false;
 
+  // validate sub category
   const allowedSubs = SUB_CATEGORY[r.caseReasonCategory];
-  if (!allowedSubs?.includes(r.subCategory)) return false;
-
-  if (
-    r.subSubCategory &&
-    !SUB_SUB_CATEGORY.includes(r.subSubCategory)
-  ) {
+  if (!allowedSubs || !allowedSubs.includes(r.subCategory)) {
     return false;
+  }
+
+  // validate sub-sub category (nested)
+  if (r.subSubCategory) {
+    const allowedSubSubs =
+      SUB_SUB_CATEGORY?.[r.caseReasonCategory]?.[r.subCategory];
+
+    if (
+      !Array.isArray(allowedSubSubs) ||
+      !allowedSubSubs.includes(r.subSubCategory)
+    ) {
+      return false;
+    }
   }
 
   return true;
