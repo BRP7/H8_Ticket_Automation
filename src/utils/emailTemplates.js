@@ -1,6 +1,6 @@
 export function ticketSuccessTemplate({ ticketId, circuitId }) {
   return {
-    subject: `✅ H8 Ticket Created – ${ticketId}`,
+    subject: `H8 Ticket Created – ${ticketId}`,
     html: `
       <h3>Ticket Created Successfully</h3>
       <p><b>Ticket ID:</b> ${ticketId}</p>
@@ -25,7 +25,7 @@ export function ticketDuplicateTemplate({ circuitId }) {
 
 export function ticketFailureTemplate({ circuitId, error }) {
   return {
-    subject: `❌ H8 Ticket Failed – Manual Action Required`,
+    subject: `H8 Ticket Failed – Manual Action Required`,
     html: `
       <h3>Ticket Creation Failed</h3>
       <p><b>Circuit ID:</b> ${circuitId}</p>

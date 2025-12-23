@@ -6,6 +6,14 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
 });
 
+function trimBody(body, maxChars = 12000) {
+  if (!body) return "";
+  return body.length > maxChars
+    ? body.slice(0, maxChars) + "\n\n[TRUNCATED]"
+    : body;
+}
+
+
 // Canonical allowed values
 const CASE_REASON_MAP = {
   "service affecting": "Service Affecting",
@@ -23,7 +31,7 @@ From:
 ${from}
 
 Body:
-${body}
+${trimBody(body)}
 `;
 
   const res = await openai.chat.completions.create({
