@@ -1,5 +1,6 @@
 import "dotenv/config";
 import { pollInbox } from "./poller.js";
+import { sendDailySummary } from "./jobs/dailySummary.js";
 
 let isRunning = false;
 
@@ -9,6 +10,10 @@ async function safePoll() {
 
   try {
     await pollInbox();
+
+    if (process.env.MANUAL_SUMMARY === "true") {
+      await sendDailySummary();
+    }
   } catch (err) {
     console.error("❌ Poll error:", err);
   } finally {
