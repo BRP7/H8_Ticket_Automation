@@ -1,4 +1,6 @@
 import { chromium } from "playwright";
+import { sanitizeForAspNet } from "./utils/sanitizeText.js";
+
 
 /**
  * Create H8 ticket using Playwright (ASP.NET safe)
@@ -9,14 +11,41 @@ export async function createH8Ticket(data) {
     caseReasonCategory,
     subCategory,
     subSubCategory,
+    originalEmailBody,
     priority,
     summary,
   } = data;
 
-  const finalDescription =
-    `This ticket is created for testing purposes only. No action is required.\n\n` +
-    `--- Original Email Content ---\n` +
-    (summary || "No email body available");
+  // const finalDescription =
+  //   `This ticket is created for testing purposes only. No action is required.\n\n` +
+  //   `--- Original Email Content ---\n` +
+  //   (summary || "No email body available");
+
+
+const rawDescription = `
+This ticket is created for testing purposes only. No action is required.
+
+------------------------------
+Original Email Content
+------------------------------
+${originalEmailBody || "No email body available"}
+
+------------------------------
+System Summary
+------------------------------
+${summary || "-"}
+`.trim();
+
+const MAX_LEN = 3500;
+const finalDescription = sanitizeForAspNet(rawDescription).slice(0, MAX_LEN);
+
+
+// const finalDescription =
+//   `This ticket is created for testing purposes only. No action is required.\n\n` +
+//   `--- Original Email Content ---\n` +
+//   (cleanSummary || "No email body available");
+
+
 
   const browser = await chromium.launch({
     headless: false,
