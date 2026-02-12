@@ -1,345 +1,91 @@
-// import { classifyEmailWithGPT } from "./gpt/classify.js";
-// import { createH8Ticket } from "./h8.js";
-// import {
-//   fetchUnreadEmails,
-//   markAsRead,
-//   moveToFolder,
-// } from "./outlook.js";
-// import { logTicket } from "./utils/ticketLogger.js";
-// import { withRetry } from "./utils/retry.js";
-// import { isRetryableError } from "./utils/errorClassifier.js";
-// import { sendMail } from "./utils/mailer.js";
-// import {
-//   ticketSuccessTemplate,
-//   ticketDuplicateTemplate,
-//   ticketFailureTemplate,
-// } from "./utils/emailTemplates.js";
-// import {
-//   ackSuccessTemplate,
-//   ackDuplicateTemplate,
-//   ackFailureTemplate,
-// } from "./utils/clientAckTemplates.js";
-// import { replyToMessage } from "./outlook.js";
-
-
-// function isSystemEmail(email = "") {
-//   return (
-//     email.includes("no-reply") ||
-//     email.includes("noreply") ||
-//     email.includes("postmaster") ||
-//     email.includes("microsoft.com")
-//   );
-// }
+// import { fetchInboxEmails, tagMessage } from "./outlook.js";
+// import { enqueue } from "./utils/queue.js";
 
 // export async function pollInbox() {
-//   console.log("📩 Poller started...");
+//   const emails = await fetchInboxEmails();
 
-//   const emails = await fetchUnreadEmails();
-//   console.log(`📨 Fetched ${emails.length} unread emails`);
+//   const skipTags = [
+//     "H8-QUEUED",
+//     "H8-PROCESSED",
+//     "H8-FAILED",
+//     "H8-OTHER",
+//     "H8-MANUAL"
+//   ];
 
 //   for (const mail of emails) {
-//     let gptResult = null;
-//     const clientEmail = mail.from?.emailAddress?.address || null;
+//     if (mail.categories?.some(tag => skipTags.includes(tag))) continue;
 
-//     try {
-//       /* =========================
-//          1️⃣ GPT CLASSIFICATION
-//       ========================== */
-//       gptResult = await classifyEmailWithGPT({
-//         subject: mail.subject,
-//         from: clientEmail,
-//         body: mail.bodyText,
-//       });
-
-//       if (!gptResult.isIssue) {
-//         await markAsRead(mail.id);
-//         continue;
-//       }
-
-//       /* =========================
-//          2️⃣ CREATE TICKET (WITH RETRY)
-//       ========================== */
-//       const ticketId = await withRetry(
-//         () => createH8Ticket({
-//           ...gptResult,
-//           originalEmailBody: mail.bodyText,
-//         }),
-//         {
-//           retries: 3,
-//           delayMs: 7000,
-//           onRetry: (err, attempt) => {
-//             if (err.code === "DUPLICATE_CASE") throw err;
-//             if (!isRetryableError(err)) throw err;
-//             console.warn(`🔁 Retry ${attempt}:`, err.message);
-//           },
-//         }
-//       );
-
-//       /* =========================
-//          3️⃣ SUCCESS HANDLING
-//       ========================== */
-//       logTicket({
-//         circuitId: gptResult.circuitId,
-//         ticketId,
-//         emailId: mail.id,
-//         from: clientEmail || "unknown@unknown",
-//         status: "SUCCESS",
-//       });
-
-//       await markAsRead(mail.id);
-//       await moveToFolder(mail.id, "H8-Processed").catch(() => {});
-
-//       // Admin mail
-//       const adminMail = ticketSuccessTemplate({
-//         ticketId,
-//         circuitId: gptResult.circuitId,
-//       });
-
-//       await sendMail({
-//         to: process.env.NOTIFY_EMAIL,
-//         subject: adminMail.subject,
-//         html: adminMail.html,
-//       });
-
-//       // Client ACK
-//       if (clientEmail && !isSystemEmail(clientEmail)) {
-//         // const ack = ackSuccessTemplate({
-//         //   ticketId,
-//         //   circuitId: gptResult.circuitId,
-//         // });
-
-//       const bookedAt = new Date().toLocaleString("en-IN", {
-//         timeZone: "Asia/Kolkata",
-//         day: "2-digit",
-//         month: "short",
-//         year: "numeric",
-//         hour: "2-digit",
-//         minute: "2-digit",
-//         hour12: true,
-//       });
-
-//       const ack = ackSuccessTemplate({
-//         ticketId,
-//         circuitId: gptResult.circuitId,
-//         bookedAt,
-//       });
-
-//         // await replyToMessage(
-//         //   mail.id,
-//         //   ack.html
-//         // );
-
-//         await replyToMessage(mail.id, ack.html);
-//       }
-
-//     } catch (err) {
-//       /* =========================
-//          4️⃣ FAILURE / DUPLICATE
-//       ========================== */
-//       logTicket({
-//         circuitId: gptResult?.circuitId || "UNKNOWN",
-//         ticketId: null,
-//         emailId: mail.id,
-//         from: clientEmail || "unknown@unknown",
-//         status:
-//           err.code === "DUPLICATE_CASE"
-//             ? "DUPLICATE_CASE"
-//             : "FAILED",
-//       });
-
-//       // DUPLICATE CASE
-//       if (err.code === "DUPLICATE_CASE") {
-//         const adminMail = ticketDuplicateTemplate({
-//           circuitId: gptResult.circuitId,
-//         });
-
-//         await sendMail({
-//           to: process.env.NOTIFY_EMAIL,
-//           subject: adminMail.subject,
-//           html: adminMail.html,
-//         });
-
-//         if (clientEmail && !isSystemEmail(clientEmail)) {
-//           const ack = ackDuplicateTemplate({
-//             circuitId: gptResult.circuitId,
-//           });
-
-//           await replyToMessage(mail.id, ack.html);
-//         }
-
-//         await markAsRead(mail.id);
-//         continue;
-//       }
-
-//       // GENERAL FAILURE
-//       const adminMail = ticketFailureTemplate({
-//         circuitId: gptResult?.circuitId || "UNKNOWN",
-//         error: err.message,
-//       });
-
-//       await sendMail({
-//         to: process.env.NOTIFY_EMAIL,
-//         subject: adminMail.subject,
-//         html: adminMail.html,
-//       });
-
-//       if (clientEmail && !isSystemEmail(clientEmail)) {
-//         const ack = ackFailureTemplate({
-//           circuitId: gptResult?.circuitId || "UNKNOWN",
-//         });
-
-//         // await sendMail({
-//         //   to: clientEmail,
-//         //   subject: ack.subject,
-//         //   html: ack.html,
-//         // });
-//         if (clientEmail && !isSystemEmail(clientEmail)) {
-//           await replyToMessage(mail.id, ack.html);
-//         }
-//       }
-//     }
+//     enqueue(mail);
+//     await tagMessage(mail.id, "H8-QUEUED");
 //   }
+
+//   console.log(`📨 Enqueued ${emails.length} emails`);
 // }
 
 
-import { classifyEmailWithGPT } from "./gpt/classify.js";
-import { createH8Ticket } from "./h8.js";
-import { fetchInboxEmails, tagMessage, replyToMessage } from "./outlook.js";
-import { logTicket } from "./utils/ticketLogger.js";
-import { withRetry } from "./utils/retry.js";
-import { isRetryableError } from "./utils/errorClassifier.js";
-import {
-  ackSuccessTemplate,
-  ackDuplicateTemplate,
-  ackFailureTemplate,
-} from "./utils/clientAckTemplates.js";
 
-
-/* =========================
-   TAG CONSTANTS
-========================= */
-const TAGS = {
-  PROCESSED: "H8-PROCESSED",
-  OTHER: "H8-OTHER",
-  DUPLICATE: "H8-DUPLICATE",
-  FAILED: "H8-FAILED",
-};
+import { fetchInboxEmails, tagMessage } from "./outlook.js";
+import { enqueue } from "./utils/queue.js";
 
 export async function pollInbox() {
-  console.log("📩 Poller started (TAG based)");
-
   const emails = await fetchInboxEmails();
-  console.log(`📨 Fetched ${emails.length} emails`);
+
+  const skipTags = [
+    "H8-QUEUED",
+    "H8-PROCESSED",
+    "H8-FAILED",
+    "H8-OTHER",
+    "H8-MANUAL"
+  ];
+
+  let enqueuedCount = 0;
 
   for (const mail of emails) {
-    // ⛔ Skip already processed mails
-    if (mail.categories?.some(c => c.startsWith("H8-"))) {
-      continue;
-    }
+    if (mail.categories?.some(tag => skipTags.includes(tag))) continue;
 
-    let gptResult = null;
-    const clientEmail = mail.from?.emailAddress?.address || "unknown";
-
-    try {
-      /* =========================
-         1️⃣ GPT CLASSIFICATION
-      ========================== */
-      gptResult = await classifyEmailWithGPT({
-        subject: mail.subject,
-        from: clientEmail,
-        body: mail.bodyText,
-      });
-
-      // NON-ISSUE MAIL
-      if (!gptResult.isIssue) {
-        await tagMessage(mail.id, TAGS.OTHER);
-        continue;
-      }
-
-      /* =========================
-         2️⃣ CREATE TICKET (RETRY)
-      ========================== */
-      const ticketId = await withRetry(
-        () =>
-          createH8Ticket({
-            ...gptResult,
-            originalEmailBody: mail.bodyText,
-          }),
-        {
-          retries: 3,
-          delayMs: 7000,
-          onRetry: (err, attempt) => {
-            if (err.code === "DUPLICATE_CASE") throw err;
-            if (!isRetryableError(err)) throw err;
-            console.warn(`🔁 Retry ${attempt}:`, err.message);
-          },
-        }
-      );
-
-      /* =========================
-         3️⃣ SUCCESS
-      ========================== */
-      logTicket({
-        circuitId: gptResult.circuitId,
-        ticketId,
-        emailId: mail.id,
-        from: clientEmail,
-        status: "SUCCESS",
-      });
-
-      await tagMessage(mail.id, TAGS.PROCESSED);
-
-      const bookedAt = new Date().toLocaleString("en-IN", {
-        timeZone: "Asia/Kolkata",
-        day: "2-digit",
-        month: "short",
-        year: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-        hour12: true,
-      });
-
-      const ack = ackSuccessTemplate({
-        ticketId,
-        circuitId: gptResult.circuitId,
-        bookedAt,
-      });
-
-      await replyToMessage(mail.id, ack.html);
-
-    } catch (err) {
-      /* =========================
-         4️⃣ DUPLICATE
-      ========================== */
-      if (err.code === "DUPLICATE_CASE") {
-        await tagMessage(mail.id, TAGS.DUPLICATE);
-
-        const ack = ackDuplicateTemplate({
-          circuitId: gptResult?.circuitId || "UNKNOWN",
-        });
-
-        await replyToMessage(mail.id, ack.html);
-        continue;
-      }
-
-      /* =========================
-         5️⃣ FAILURE
-      ========================== */
-      await tagMessage(mail.id, TAGS.FAILED);
-
-      logTicket({
-        circuitId: gptResult?.circuitId || "UNKNOWN",
-        ticketId: null,
-        emailId: mail.id,
-        from: clientEmail,
-        status: "FAILED",
-      });
-
-      const ack = ackFailureTemplate({
-        circuitId: gptResult?.circuitId || "UNKNOWN",
-      });
-
-      await replyToMessage(mail.id, ack.html);
-    }
+    enqueue(mail);
+    await tagMessage(mail.id, "H8-QUEUED");
+    enqueuedCount++;
   }
+
+  console.log(`📨 Enqueued ${enqueuedCount} new emails`);
 }
+
+
+
+// import { fetchInboxEmails } from "./outlook.js";
+// import { classifyEmailWithGPT } from "./gpt/classify.js";
+// import { sanitizeForAspNet } from "./utils/sanitizeText.js";
+
+// export async function pollInbox() {
+//   const emails = await fetchInboxEmails();
+
+//   console.log(`📥 Total emails fetched: ${emails.length}`);
+
+//   const firstFive = emails.slice(0, 50);
+
+//   for (const mail of firstFive) {
+
+//     const cleanBody = sanitizeForAspNet(mail.bodyText);
+
+//     console.log("\n==================================================");
+//     console.log("📧 SUBJECT:");
+//     console.log(mail.subject);
+
+//     console.log("\n📝 BODY (SANITIZED TEXT SENT TO GPT):");
+//     console.log(cleanBody);
+
+//     console.log("\n🤖 Calling GPT...\n");
+
+//     const gpt = await classifyEmailWithGPT({
+//       subject: mail.subject,
+//       body: cleanBody
+//     });
+
+//     console.log("🧠 GPT OUTPUT:");
+//     console.log(JSON.stringify(gpt, null, 2));
+//   }
+
+//   console.log("\n🛑 DEBUG TEST COMPLETE");
+//   process.exit(0);
+// }

@@ -1,29 +1,51 @@
+// import "dotenv/config";
+// import { pollInbox } from "./poller.js";
+// import { startWorker } from "./worker.js";
+
+// console.log("🚀 H8 Automation started");
+
+// startWorker();
+
+// setInterval(async () => {
+//   console.log("📩 Running poll...");
+//   await pollInbox();
+// }, 60000);
+
+
+
+// Phase 1
+
+// import { pollInbox } from "./poller.js";
+
+// // 🔴 DO NOT START WORKER DURING DEBUG
+// // import { startWorker } from "./worker.js";
+
+// console.log("🚀 DEBUG MODE STARTED");
+
+// await pollInbox();
+
+// // 🔴 Force stop
+// process.exit(0);
+
+
+//Phase 2
+
 import "dotenv/config";
 import { pollInbox } from "./poller.js";
-import { sendDailySummary } from "./jobs/dailySummary.js";
+import { startWorker } from "./worker.js";
+import { startDailySummaryScheduler } from "./utils/summaryScheduler.js";
 
-let isRunning = false;
+console.log("🚀 H8 Automation started (PHASE 2.7)");
 
-async function safePoll() {
-  if (isRunning) return;
-  isRunning = true;
+startWorker();
 
-  try {
-    await pollInbox();
+// Poll inbox every 60 seconds
+setInterval(async () => {
+  console.log("📩 Running poll...");
+  await pollInbox();
+}, 60000);
 
-    if (process.env.MANUAL_SUMMARY === "true") {
-      await sendDailySummary();
-    }
-  } catch (err) {
-    console.error("❌ Poll error:", err);
-  } finally {
-    isRunning = false;
-  }
+// Daily summary only in PROD
+if (process.env.APP_MODE === "PROD") {
+  startDailySummaryScheduler();
 }
-
-// 🔹 RUN IMMEDIATELY
-console.log("🚀 H8 Automation started");
-safePoll();
-
-// 🔹 THEN RUN EVERY MINUTE
-setInterval(safePoll, 60 * 1000);

@@ -1,28 +1,45 @@
 import OpenAI from "openai";
-import { SYSTEM_PROMPT } from "./prompt.js";
+import { SUB_SUB_CATEGORY } from "./schema.js";
 import { validateGPTResult } from "./validator.js";
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
 });
 
-function trimBody(body, maxChars = 12000) {
+// 🔹 Flatten allowed SubSub list dynamically
+const ALL_SUB_SUB = Object.values(SUB_SUB_CATEGORY)
+  .flatMap(sub => Object.values(sub))
+  .flat();
+
+function trimBody(body, maxChars = 10000) {
   if (!body) return "";
   return body.length > maxChars
-    ? body.slice(0, maxChars) + "\n\n[TRUNCATED]"
+    ? body.slice(0, maxChars)
     : body;
 }
 
+function resolveHierarchy(subSub) {
+  for (const caseReason in SUB_SUB_CATEGORY) {
+    for (const subCat in SUB_SUB_CATEGORY[caseReason]) {
+      if (SUB_SUB_CATEGORY[caseReason][subCat].includes(subSub)) {
+        return {
+          caseReasonCategory: caseReason,
+          subCategory: subCat
+        };
+      }
+    }
+  }
+  return null;
+}
 
-// Canonical allowed values
-const CASE_REASON_MAP = {
-  "service affecting": "Service Affecting",
-  "non service affecting": "Non Service Affecting",
-  "change request": "Change Request",
-  "field visit": "Field Visit"
-};
+function getPriority(caseReason) {
+  if (caseReason === "Service Affecting") return "High";
+  if (caseReason === "Non Service Affecting") return "Medium";
+  return "Low";
+}
 
 export async function classifyEmailWithGPT({ subject, from, body }) {
+
   const input = `
 Subject:
 ${subject}
@@ -37,56 +54,99 @@ ${trimBody(body)}
   const res = await openai.chat.completions.create({
     model: "gpt-4o-mini",
     temperature: 0,
+    response_format: { type: "json_object" },
     messages: [
-      { role: "system", content: SYSTEM_PROMPT },
+      {
+        role: "system",
+        content: `
+You are a Telecom Service Incident Classifier for Optimal Telemedia.
+
+Your job is to detect ONLY customer-facing telemedia service issues.
+
+A valid issue MUST:
+1. Be related to a telecom service provided by Optimal Telemedia.
+2. Impact a customer MPLS, Internet, Fiber, Lease Line, or similar service.
+3. Clearly match ONE of the allowed subSubCategory values below.
+4. Be an ACTIVE fault (not resolved, not restored, not closed).
+
+DO NOT classify as issue if:
+- Monitoring alert only (ICMP, SNMP, Zabbix, system logs)
+- Firewall/security alerts
+- IPsec tunnel up notifications
+- Vendor auto updates without confirmed outage
+- Ticket closed / resolved / restored
+- Informational update without impact
+
+If subject or body contains:
+resolved, restored, closed, link up, tunnel up, problem resolved
+→ isIssue MUST be false
+
+If content does NOT clearly match an allowed subSubCategory:
+→ isIssue MUST be false
+→ subSubCategory MUST be null
+
+Never force classification.
+
+Extract circuit ID ONLY if clearly visible.
+
+Allowed subSubCategory values:
+${ALL_SUB_SUB.map(v => `- ${v}`).join("\n")}
+
+Return JSON only:
+
+{
+  "isIssue": boolean,
+  "circuitId": string | null,
+  "subSubCategory": string | null,
+  "summary": string | null,
+  "confidence": number
+}
+`
+      },
       { role: "user", content: input }
     ]
   });
 
   const raw = res.choices[0].message.content;
 
-  console.log("🧠 RAW GPT RESPONSE:\n", raw);
-
   let parsed;
   try {
     parsed = JSON.parse(raw);
   } catch {
-    throw new Error("GPT returned invalid JSON");
+    throw new Error("GPT returned invalid JSON:\n" + raw);
   }
 
-  /* =========================
-     🔧 NORMALIZATION LAYER
-  ========================== */
-
-  // Normalize Case Reason Category
-  if (parsed.caseReasonCategory) {
-    const key = parsed.caseReasonCategory.toLowerCase().trim();
-    parsed.caseReasonCategory = CASE_REASON_MAP[key] ?? parsed.caseReasonCategory;
+  if (typeof parsed.isIssue !== "boolean") {
+    throw new Error("Invalid GPT structure");
   }
 
-  // Normalize confidence (95 → 0.95)
-  if (typeof parsed.confidence === "number") {
-    if (parsed.confidence > 1) {
-      parsed.confidence = parsed.confidence / 100;
+  // 🔹 Validate subSub strictly
+  if (
+    parsed.subSubCategory &&
+    !ALL_SUB_SUB.includes(parsed.subSubCategory)
+  ) {
+    parsed.subSubCategory = null;
+    parsed.isIssue = false;
+  }
+
+  // 🔹 Resolve hierarchy only if valid issue
+  if (parsed.isIssue && parsed.subSubCategory) {
+    const hierarchy = resolveHierarchy(parsed.subSubCategory);
+
+    if (!hierarchy) {
+      parsed.isIssue = false;
+      parsed.subSubCategory = null;
+    } else {
+      parsed.caseReasonCategory = hierarchy.caseReasonCategory;
+      parsed.subCategory = hierarchy.subCategory;
+      parsed.priority = getPriority(hierarchy.caseReasonCategory);
     }
   }
 
-  // Safety: if classified, force isIssue
-  if (
-    parsed.caseReasonCategory &&
-    parsed.subCategory &&
-    parsed.subSubCategory
-  ) {
-    parsed.isIssue = true;
-  }
-
-  /* =========================
-     ✅ VALIDATE AFTER FIXING
-  ========================== */
+  // 🔹 Final structural validation
   if (!validateGPTResult(parsed)) {
     throw new Error(
-      "GPT output failed validation AFTER normalization:\n" +
-      JSON.stringify(parsed, null, 2)
+      "Validation failed:\n" + JSON.stringify(parsed, null, 2)
     );
   }
 

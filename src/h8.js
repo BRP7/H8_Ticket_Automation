@@ -1,10 +1,250 @@
-import { chromium } from "playwright";
+// import { chromium } from "playwright";
+// import { sanitizeForAspNet } from "./utils/sanitizeText.js";
+
+// /**
+//  * Create H8 ticket using Playwright (ASP.NET safe)
+//  */
+// export async function createH8Ticket(data) {
+//   const {
+//     circuitId,
+//     caseReasonCategory,
+//     subCategory,
+//     subSubCategory,
+//     originalEmailBody,
+//     summary,
+//   } = data;
+
+//   /* =========================
+//      DESCRIPTION BUILD
+//   ========================== */
+//   const rawDescription = `
+// This ticket is created automatically by system.
+
+// ------------------------------
+// Original Email Content
+// ------------------------------
+// ${originalEmailBody || "No email body available"}
+
+// ------------------------------
+// System Summary
+// ------------------------------
+// ${summary || "-"}
+// `.trim();
+
+//   const MAX_LEN = 3500;
+//   const finalDescription = sanitizeForAspNet(rawDescription).slice(
+//     0,
+//     MAX_LEN
+//   );
+
+//   /* =========================
+//      LAUNCH BROWSER (HEADLESS)
+//   ========================== */
+//   const browser = await chromium.launch({
+//     headless: true,
+//   });
+
+//   const context = await browser.newContext({
+//     ignoreHTTPSErrors: true,
+//   });
+
+//   const page = await context.newPage();
+
+//   try {
+//     /* =========================
+//        1️⃣ LOGIN
+//     ========================== */
+//     await page.goto("http://admin.optimaltele.net/Login.aspx", {
+//       waitUntil: "domcontentloaded",
+//       timeout: 60000,
+//     });
+
+//     await page.fill("#txtUserName", process.env.H8_USERNAME);
+//     await page.fill("#txtPassword", process.env.H8_PASSWORD);
+//     await page.click("#save");
+
+//     await page.waitForTimeout(5000);
+
+//     /* =========================
+//        2️⃣ NEW CASE PAGE
+//     ========================== */
+//     await page.goto("http://admin.optimaltele.net/NewCase.aspx", {
+//       waitUntil: "domcontentloaded",
+//       timeout: 60000,
+//     });
+
+//     await page.waitForTimeout(5000);
+
+//     /* =========================
+//        3️⃣ SELECT LEASE ACCOUNT
+//     ========================== */
+//     await page.waitForSelector("select[id*='ddlAccountnam']", {
+//       timeout: 30000,
+//     });
+
+//     await page.evaluate(() => {
+//       const ddl = document.querySelector("select[id*='ddlAccountnam']");
+//       const option = [...ddl.options].find(
+//         (o) => o.textContent.trim() === "Lease Account"
+//       );
+//       if (!option) throw new Error("Lease Account option not found");
+
+//       ddl.value = option.value;
+//       ddl.dispatchEvent(new Event("change", { bubbles: true }));
+//     });
+
+//     await page.waitForTimeout(4000);
+
+//     /* =========================
+//        4️⃣ ENTER CIRCUIT ID
+//     ========================== */
+//     await page.waitForSelector("input[id*='txtLeasecircuit']", {
+//       timeout: 30000,
+//     });
+
+//     await page.evaluate((circuitId) => {
+//       const input = document.querySelector(
+//         "input[id*='txtLeasecircuit']"
+//       );
+//       input.value = circuitId;
+//       input.dispatchEvent(new Event("input", { bubbles: true }));
+//       input.dispatchEvent(new Event("change", { bubbles: true }));
+//     }, circuitId);
+
+//     await page.waitForTimeout(5000);
+
+//     /* =========================
+//        5️⃣ DROPDOWNS
+//     ========================== */
+//     await selectAndWait(
+//       page,
+//       "#ContentPlaceHolder1_ddlCategory",
+//       caseReasonCategory
+//     );
+
+//     await selectAndWait(
+//       page,
+//       "#ContentPlaceHolder1_ddlsubCategory",
+//       subCategory
+//     );
+
+//     await selectAndWait(
+//       page,
+//       "#ContentPlaceHolder1_ddlSubSubCategory",
+//       subSubCategory
+//     );
+
+//     /* =========================
+//        6️⃣ TITLE & DESCRIPTION
+//     ========================== */
+//     await page.fill(
+//       "#ContentPlaceHolder1_txttitle",
+//       "Fault Ticket – Automated"
+//     );
+
+//     await page.fill(
+//       "#ContentPlaceHolder1_txtDesc",
+//       finalDescription
+//     );
+
+//     /* =========================
+//        7️⃣ SAVE
+//     ========================== */
+//     await page.click("#ContentPlaceHolder1_btnsave");
+
+//     /* =========================
+//        8️⃣ WAIT FOR RESULT
+//     ========================== */
+//     const duplicateBanner = page.locator(
+//       "text=Case is already open"
+//     );
+
+//     try {
+//       await Promise.race([
+//         page.waitForSelector(".sweet-alert", {
+//           timeout: 20000,
+//         }),
+//         duplicateBanner.waitFor({ timeout: 20000 }),
+//       ]);
+//     } catch {
+//       throw new Error("UNKNOWN_SAVE_RESULT");
+//     }
+
+//     /* =========================
+//        9️⃣ DUPLICATE CHECK
+//     ========================== */
+//     if (await duplicateBanner.isVisible()) {
+//       const err = new Error("DUPLICATE_CASE");
+//       err.code = "DUPLICATE_CASE";
+//       throw err;
+//     }
+
+//     /* =========================
+//        🔟 READ TICKET ID
+//     ========================== */
+//     const ticketId = await page.evaluate(() => {
+//       const tds = [...document.querySelectorAll(".sweet-alert td")];
+//       const idx = tds.findIndex((td) =>
+//         td.textContent.trim().startsWith("Ticket ID")
+//       );
+//       return idx !== -1
+//         ? tds[idx + 1]?.innerText.trim()
+//         : null;
+//     });
+
+//     if (!ticketId) {
+//       throw new Error("Ticket ID not found");
+//     }
+
+//     await page.click(".sweet-alert button.confirm");
+
+//     return ticketId;
+//   } finally {
+//     await browser.close();
+//   }
+// }
+
+// /* =====================================================
+//    SAFE DROPDOWN SELECT (ASP.NET STABLE)
+// ===================================================== */
+// async function selectAndWait(page, selector, text) {
+//   await page.waitForSelector(selector, { timeout: 30000 });
+
+//   await page.waitForFunction(
+//     (sel) => {
+//       const el = document.querySelector(sel);
+//       return el && el.options.length > 1;
+//     },
+//     selector
+//   );
+
+//   await page.evaluate(
+//     ({ selector, text }) => {
+//       const ddl = document.querySelector(selector);
+//       const opt = [...ddl.options].find(
+//         (o) =>
+//           o.textContent.trim().toLowerCase() ===
+//           text.toLowerCase()
+//       );
+//       if (!opt)
+//         throw new Error(`Option "${text}" not found`);
+
+//       ddl.value = opt.value;
+//       ddl.dispatchEvent(
+//         new Event("change", { bubbles: true })
+//       );
+//     },
+//     { selector, text }
+//   );
+
+//   await page.waitForTimeout(4000);
+// }
+
+
+
 import { sanitizeForAspNet } from "./utils/sanitizeText.js";
+import { getBrowserContext } from "./browserManager.js";
 
-
-/**
- * Create H8 ticket using Playwright (ASP.NET safe)
- */
 export async function createH8Ticket(data) {
   const {
     circuitId,
@@ -12,18 +252,11 @@ export async function createH8Ticket(data) {
     subCategory,
     subSubCategory,
     originalEmailBody,
-    priority,
     summary,
   } = data;
 
-  // const finalDescription =
-  //   `This ticket is created for testing purposes only. No action is required.\n\n` +
-  //   `--- Original Email Content ---\n` +
-  //   (summary || "No email body available");
-
-
-const rawDescription = `
-This ticket is created for testing purposes only. No action is required.
+  const rawDescription = `
+This ticket is created via automation.
 
 ------------------------------
 Original Email Content
@@ -36,32 +269,12 @@ System Summary
 ${summary || "-"}
 `.trim();
 
-const MAX_LEN = 3500;
-const finalDescription = sanitizeForAspNet(rawDescription).slice(0, MAX_LEN);
+  const finalDescription = sanitizeForAspNet(rawDescription).slice(0, 3500);
 
-
-// const finalDescription =
-//   `This ticket is created for testing purposes only. No action is required.\n\n` +
-//   `--- Original Email Content ---\n` +
-//   (cleanSummary || "No email body available");
-
-
-
-  const browser = await chromium.launch({
-    headless: false,
-    slowMo: 50,
-  });
-
-  const context = await browser.newContext({
-    ignoreHTTPSErrors: true,
-  });
-
+  const context = await getBrowserContext();
   const page = await context.newPage();
 
   try {
-    /* =========================
-       1️⃣ LOGIN
-    ========================== */
     await page.goto("http://admin.optimaltele.net/Login.aspx", {
       waitUntil: "domcontentloaded",
       timeout: 60000,
@@ -70,95 +283,50 @@ const finalDescription = sanitizeForAspNet(rawDescription).slice(0, MAX_LEN);
     await page.fill("#txtUserName", process.env.H8_USERNAME);
     await page.fill("#txtPassword", process.env.H8_PASSWORD);
     await page.click("#save");
-    await page.waitForTimeout(6000);
+    await page.waitForTimeout(4000);
 
-    /* =========================
-       2️⃣ NEW CASE PAGE
-    ========================== */
     await page.goto("http://admin.optimaltele.net/NewCase.aspx", {
       waitUntil: "domcontentloaded",
       timeout: 60000,
     });
-    await page.waitForTimeout(5000);
 
-    /* =========================
-       3️⃣ SELECT LEASE ACCOUNT
-    ========================== */
-    await page.waitForSelector("select[id*='ddlAccountnam']", {
-      timeout: 30000,
-    });
+    await page.waitForTimeout(4000);
 
+    // Select Lease Account
     await page.evaluate(() => {
       const ddl = document.querySelector("select[id*='ddlAccountnam']");
       const option = [...ddl.options].find(
         o => o.textContent.trim() === "Lease Account"
       );
-      if (!option) throw new Error("Lease Account option not found");
+      if (!option) throw new Error("Lease Account not found");
       ddl.value = option.value;
       ddl.dispatchEvent(new Event("change", { bubbles: true }));
     });
 
-    await page.waitForTimeout(5000);
+    await page.waitForTimeout(3000);
 
-    /* =========================
-       4️⃣ ENTER CIRCUIT ID
-    ========================== */
-    await page.waitForSelector("input[id*='txtLeasecircuit']", {
-      timeout: 30000,
-    });
-
+    // Circuit ID
     await page.evaluate((circuitId) => {
       const input = document.querySelector("input[id*='txtLeasecircuit']");
       input.value = circuitId;
-      input.dispatchEvent(new Event("input", { bubbles: true }));
       input.dispatchEvent(new Event("change", { bubbles: true }));
     }, circuitId);
 
-    await page.waitForTimeout(6000);
+    await page.waitForTimeout(3000);
 
-    /* =========================
-       5️⃣ DROPDOWNS
-    ========================== */
+    // Dropdowns
     await selectAndWait(page, "#ContentPlaceHolder1_ddlCategory", caseReasonCategory);
     await selectAndWait(page, "#ContentPlaceHolder1_ddlsubCategory", subCategory);
     await selectAndWait(page, "#ContentPlaceHolder1_ddlSubSubCategory", subSubCategory);
-    await selectAndWait(page, "#ContentPlaceHolder1_ddlPriority", priority);
 
-    /* =========================
-       6️⃣ TITLE & DESCRIPTION
-    ========================== */
-    await page.fill("#ContentPlaceHolder1_txttitle", "TEST – Fault Ticket Creation");
+    // Title & Description
+    await page.fill("#ContentPlaceHolder1_txttitle", "Automated Ticket");
     await page.fill("#ContentPlaceHolder1_txtDesc", finalDescription);
 
-    /* =========================
-       7️⃣ SAVE
-    ========================== */
     await page.click("#ContentPlaceHolder1_btnsave");
 
-    /* =========================
-       8️⃣ POST-SAVE RESULT CHECK
-    ========================== */
-    const duplicateBanner = page.locator("text=Case is already open");
+    await page.waitForSelector(".sweet-alert", { timeout: 20000 });
 
-    try {
-      await Promise.race([
-        page.waitForSelector(".sweet-alert", { timeout: 20000 }),
-        duplicateBanner.waitFor({ timeout: 20000 }),
-      ]);
-    } catch {
-      throw new Error("UNKNOWN_SAVE_RESULT");
-    }
-
-    if (await duplicateBanner.isVisible()) {
-      const err = new Error("DUPLICATE_CASE");
-      err.code = "DUPLICATE_CASE";
-      err.details = await duplicateBanner.innerText();
-      throw err;
-    }
-
-    /* =========================
-       9️⃣ READ TICKET ID
-    ========================== */
     const ticketId = await page.evaluate(() => {
       const tds = [...document.querySelectorAll(".sweet-alert td")];
       const idx = tds.findIndex(td =>
@@ -167,32 +335,19 @@ const finalDescription = sanitizeForAspNet(rawDescription).slice(0, MAX_LEN);
       return idx !== -1 ? tds[idx + 1]?.innerText.trim() : null;
     });
 
-    if (!ticketId) {
-      throw new Error("Ticket ID not found");
-    }
+    if (!ticketId) throw new Error("Ticket ID not found");
 
     await page.click(".sweet-alert button.confirm");
+
     return ticketId;
 
   } finally {
-    await browser.close();
+    await page.close();
   }
 }
 
-/* =====================================================
-   ASP.NET SAFE DROPDOWN SELECT
-===================================================== */
 async function selectAndWait(page, selector, text) {
-  await page.waitForSelector(selector, { timeout: 30000 });
-
-  await page.waitForFunction(
-    sel => {
-      const el = document.querySelector(sel);
-      return el && el.options.length > 1;
-    },
-    selector
-  );
-
+  await page.waitForSelector(selector);
   await page.evaluate(({ selector, text }) => {
     const ddl = document.querySelector(selector);
     const opt = [...ddl.options].find(
@@ -203,5 +358,5 @@ async function selectAndWait(page, selector, text) {
     ddl.dispatchEvent(new Event("change", { bubbles: true }));
   }, { selector, text });
 
-  await page.waitForTimeout(5000);
+  await page.waitForTimeout(2000);
 }
