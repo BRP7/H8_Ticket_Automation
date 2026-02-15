@@ -26,10 +26,11 @@ export function generateTodaySummary() {
 
   // Filter entries created TODAY in IST
   const todayEntries = raw.filter(entry => {
-    if (!entry.createdAtISO) return false;
+const iso = entry.createdAtISO || entry.time;
+if (!iso) return false;
 
-    const entryDateIST = new Date(entry.createdAtISO)
-      .toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+const entryDateIST = new Date(iso)
+  .toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
 
     return entryDateIST === todayIST;
   });
@@ -50,28 +51,34 @@ export function generateTodaySummary() {
   };
 
   for (const e of todayEntries) {
-    switch (e.status) {
-      case "SUCCESS":
-        summary.success++;
-        break;
+   switch (e.status) {
 
-      case "DUPLICATE_CASE":
-        summary.duplicate++;
-        break;
+  case "SUCCESS":
+  case "PRECHECK_SUCCESS":
+  case "SHADOW_SUCCESS":
+    summary.success++;
+    break;
 
-      case "FAILED":
-      case "FAILED_RETRY_EXHAUSTED":
-        summary.failed++;
-        break;
+  case "DUPLICATE_CASE":
+    summary.duplicate++;
+    break;
 
-      case "IGNORED":
-        summary.ignored++;
-        break;
+  case "FAILED":
+  case "FAILED_EXCEPTION":
+  case "FAILED_RETRY_EXHAUSTED":
+    summary.failed++;
+    break;
 
-      case "SYSTEM_IGNORED":
-        summary.systemIgnored++;
-        break;
-    }
+  case "IGNORED":
+    summary.ignored++;
+    break;
+
+  case "SYSTEM_IGNORED":
+  case "NOT_ISSUE":
+    summary.systemIgnored++;
+    break;
+}
+
 
     summary.details.push({
       circuitId: e.circuitId || "-",

@@ -1,21 +1,195 @@
+// import OpenAI from "openai";
+// import { SUB_SUB_CATEGORY } from "./schema.js";
+// import { SYSTEM_PROMPT } from "./prompt.js";
+// import { networkLimit } from "../utils/networkLimiter.js";
+
+// const openai = new OpenAI({
+//   apiKey: process.env.OPENAI_API_KEY
+// });
+
+// const ALL_SUB_SUB = Object.values(SUB_SUB_CATEGORY)
+//   .flatMap(sub => Object.values(sub))
+//   .flat();
+
+// function trimBody(body, maxChars = 10000) {
+//   if (!body) return "";
+//   return body.length > maxChars ? body.slice(0, maxChars) : body;
+// }
+
+// function resolveHierarchy(subSub) {
+//   for (const caseReason in SUB_SUB_CATEGORY) {
+//     for (const subCat in SUB_SUB_CATEGORY[caseReason]) {
+//       if (SUB_SUB_CATEGORY[caseReason][subCat].includes(subSub)) {
+//         return {
+//           caseReasonCategory: caseReason,
+//           subCategory: subCat
+//         };
+//       }
+//     }
+//   }
+//   return null;
+// }
+
+// function getPriority(caseReason) {
+//   if (caseReason === "Service Affecting") return "High";
+//   if (caseReason === "Non Service Affecting") return "Medium";
+//   return "Low";
+// }
+
+
+// function hardSystemIgnore(subject = "", from = "") {
+//   const s = subject.toLowerCase();
+//   const f = from.toLowerCase();
+
+//   return (
+//     s.includes("undeliverable") ||
+//     s.includes("message recall report") ||
+//     s.includes("delivery has failed") ||
+//     f.includes("postmaster") ||
+//     f.includes("mailer-daemon")
+//   );
+// }
+
+// export async function classifyEmailWithGPT({ subject, from, body }) {
+
+//   if (hardSystemIgnore(subject, from)) {
+//     return {
+//       isIssue: false,
+//       circuitId: null,
+//       caseReasonCategory: null,
+//       subCategory: null,
+//       subSubCategory: null,
+//       priority: "Medium",
+//       summary: null,
+//       confidence: 100,
+//       manualReview: false
+//     };
+//   }
+
+//   const input = `
+// Subject:
+// ${subject}
+
+// From:
+// ${from}
+
+// Body (Latest Message Only):
+// ${trimBody(body)}
+// `;
+
+//  const res = await networkLimit(() =>
+//   openai.chat.completions.create({
+//     model: "gpt-4o-mini",
+//     temperature: 0,
+//     response_format: { type: "json_object" },
+//     messages: [
+//       { role: "system", content: SYSTEM_PROMPT },
+//       { role: "user", content: input }
+//     ]
+//   })
+// );
+
+
+//   let parsed;
+
+//   try {
+//     parsed = JSON.parse(res.choices[0].message.content);
+//   } catch {
+//     throw new Error("Invalid GPT JSON");
+//   }
+
+//   // --- Basic structure validation ---
+
+//   if (typeof parsed.isIssue !== "boolean") parsed.isIssue = false;
+//   if (typeof parsed.confidence !== "number") parsed.confidence = 0;
+
+//   // --- Normalize subSub ---
+
+//  parsed.subSubCategory =
+//   ALL_SUB_SUB.find(
+//     s =>
+//       s.toLowerCase().trim() ===
+//       parsed.subSubCategory?.toLowerCase().trim()
+//   ) || null;
+
+//   // If subSub invalid → not issue
+//   if (parsed.subSubCategory === null) {
+//     parsed.isIssue = false;
+//   }
+
+//   // --- Circuit validation ---
+
+//  const CIRCUIT_REGEX = /\b(OPTL\d+|OTPL\d+|LS\d+|L\d{4,})\b/i;
+
+//  function extractCircuitId(text) {
+//   const match = text.match(CIRCUIT_REGEX);
+//   return match ? match[0] : null;
+// }
+
+// const circuitId = extractCircuitId(subject + " " + body);
+// parsed.circuitId = circuitId;
+
+
+//   // --- Resolve hierarchy ---
+
+//   if (parsed.isIssue && parsed.subSubCategory) {
+//     const hierarchy = resolveHierarchy(parsed.subSubCategory);
+
+//     if (!hierarchy) {
+//       parsed.isIssue = false;
+//     } else {
+//       parsed.caseReasonCategory = hierarchy.caseReasonCategory;
+//       parsed.subCategory = hierarchy.subCategory;
+//       parsed.priority = getPriority(hierarchy.caseReasonCategory);
+//     }
+//   } else {
+//     parsed.caseReasonCategory = null;
+//     parsed.subCategory = null;
+//     parsed.priority = "Medium";
+//   }
+
+//  if (parsed.isIssue) {
+//   if (!parsed.circuitId) {
+//     parsed.isIssue = false;
+//     parsed.subSubCategory = null;
+//     parsed.caseReasonCategory = null;
+//     parsed.subCategory = null;
+//     parsed.priority = "Medium";
+//   }
+// }
+
+//   return parsed;
+// }
+
+
 import OpenAI from "openai";
 import { SUB_SUB_CATEGORY } from "./schema.js";
-import { validateGPTResult } from "./validator.js";
+import { SYSTEM_PROMPT } from "./prompt.js";
+import { networkLimit } from "../utils/networkLimiter.js";
+
+/* =====================================================
+   OPENAI CLIENT
+===================================================== */
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
 });
 
-// 🔹 Flatten allowed SubSub list dynamically
+/* =====================================================
+   FLATTEN ALLOWED SUB-SUB LIST
+===================================================== */
+
 const ALL_SUB_SUB = Object.values(SUB_SUB_CATEGORY)
   .flatMap(sub => Object.values(sub))
   .flat();
 
+/* =====================================================
+   UTILITIES
+===================================================== */
+
 function trimBody(body, maxChars = 10000) {
-  if (!body) return "";
-  return body.length > maxChars
-    ? body.slice(0, maxChars)
-    : body;
+  if (!body || typeof body !== "string") return "";
+  return body.length > maxChars ? body.slice(0, maxChars) : body;
 }
 
 function resolveHierarchy(subSub) {
@@ -38,117 +212,153 @@ function getPriority(caseReason) {
   return "Low";
 }
 
+function hardSystemIgnore(subject = "", from = "") {
+  const s = (subject || "").toLowerCase();
+  const f = (from || "").toLowerCase();
+
+  return (
+    s.includes("undeliverable") ||
+    s.includes("message recall report") ||
+    s.includes("delivery has failed") ||
+    f.includes("postmaster") ||
+    f.includes("mailer-daemon")
+  );
+}
+
+/* =====================================================
+   STRICT CIRCUIT VALIDATION
+===================================================== */
+
+const CIRCUIT_REGEX = /\b(OPTL\d{6,}|OTPL\d{6,}|LS\d{3,}|L\d{4,})\b/i;
+
+function extractCircuitId(text) {
+  if (!text) return null;
+  const match = text.match(CIRCUIT_REGEX);
+  return match ? match[0] : null;
+}
+
+/* =====================================================
+   MAIN CLASSIFIER
+===================================================== */
+
 export async function classifyEmailWithGPT({ subject, from, body }) {
+
+  /* =========================
+     HARD SYSTEM IGNORE
+  ========================= */
+
+  if (hardSystemIgnore(subject, from)) {
+    return buildEmptyResult(100);
+  }
+
+  /* =========================
+     PREPARE INPUT
+  ========================= */
 
   const input = `
 Subject:
-${subject}
+${subject || ""}
 
 From:
-${from}
+${from || ""}
 
-Body:
+Body (Latest Message Only):
 ${trimBody(body)}
 `;
 
-  const res = await openai.chat.completions.create({
-    model: "gpt-4o-mini",
-    temperature: 0,
-    response_format: { type: "json_object" },
-    messages: [
-      {
-        role: "system",
-        content: `
-You are a Telecom Service Incident Classifier for Optimal Telemedia.
+  /* =========================
+     GPT CALL
+  ========================= */
 
-Your job is to detect ONLY customer-facing telemedia service issues.
-
-A valid issue MUST:
-1. Be related to a telecom service provided by Optimal Telemedia.
-2. Impact a customer MPLS, Internet, Fiber, Lease Line, or similar service.
-3. Clearly match ONE of the allowed subSubCategory values below.
-4. Be an ACTIVE fault (not resolved, not restored, not closed).
-
-DO NOT classify as issue if:
-- Monitoring alert only (ICMP, SNMP, Zabbix, system logs)
-- Firewall/security alerts
-- IPsec tunnel up notifications
-- Vendor auto updates without confirmed outage
-- Ticket closed / resolved / restored
-- Informational update without impact
-
-If subject or body contains:
-resolved, restored, closed, link up, tunnel up, problem resolved
-→ isIssue MUST be false
-
-If content does NOT clearly match an allowed subSubCategory:
-→ isIssue MUST be false
-→ subSubCategory MUST be null
-
-Never force classification.
-
-Extract circuit ID ONLY if clearly visible.
-
-Allowed subSubCategory values:
-${ALL_SUB_SUB.map(v => `- ${v}`).join("\n")}
-
-Return JSON only:
-
-{
-  "isIssue": boolean,
-  "circuitId": string | null,
-  "subSubCategory": string | null,
-  "summary": string | null,
-  "confidence": number
-}
-`
-      },
-      { role: "user", content: input }
-    ]
-  });
-
-  const raw = res.choices[0].message.content;
+  const response = await networkLimit(() =>
+    openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      temperature: 0,
+      response_format: { type: "json_object" },
+      messages: [
+        { role: "system", content: SYSTEM_PROMPT },
+        { role: "user", content: input }
+      ]
+    })
+  );
 
   let parsed;
+
   try {
-    parsed = JSON.parse(raw);
+    parsed = JSON.parse(response.choices[0].message.content);
   } catch {
-    throw new Error("GPT returned invalid JSON:\n" + raw);
+    throw new Error("Invalid GPT JSON response");
   }
 
-  if (typeof parsed.isIssue !== "boolean") {
+  if (!parsed || typeof parsed !== "object") {
     throw new Error("Invalid GPT structure");
   }
 
-  // 🔹 Validate subSub strictly
-  if (
-    parsed.subSubCategory &&
-    !ALL_SUB_SUB.includes(parsed.subSubCategory)
-  ) {
-    parsed.subSubCategory = null;
-    parsed.isIssue = false;
+  /* =========================
+     STRUCTURE NORMALIZATION
+  ========================= */
+
+  parsed.isIssue = typeof parsed.isIssue === "boolean" ? parsed.isIssue : false;
+  parsed.confidence = typeof parsed.confidence === "number" ? parsed.confidence : 0;
+
+  /* =========================
+     STRICT SUB-SUB MATCH
+  ========================= */
+
+  parsed.subSubCategory =
+    ALL_SUB_SUB.find(
+      s =>
+        s.toLowerCase().trim() ===
+        parsed.subSubCategory?.toLowerCase().trim()
+    ) || null;
+
+  if (!parsed.subSubCategory) {
+    return buildEmptyResult(parsed.confidence);
   }
 
-  // 🔹 Resolve hierarchy only if valid issue
-  if (parsed.isIssue && parsed.subSubCategory) {
-    const hierarchy = resolveHierarchy(parsed.subSubCategory);
+  /* =========================
+     STRICT CIRCUIT RULE
+  ========================= */
 
-    if (!hierarchy) {
-      parsed.isIssue = false;
-      parsed.subSubCategory = null;
-    } else {
-      parsed.caseReasonCategory = hierarchy.caseReasonCategory;
-      parsed.subCategory = hierarchy.subCategory;
-      parsed.priority = getPriority(hierarchy.caseReasonCategory);
-    }
+  const circuitId = extractCircuitId(`${subject} ${body}`);
+
+  if (!parsed.isIssue || !circuitId) {
+    return buildEmptyResult(parsed.confidence);
   }
 
-  // 🔹 Final structural validation
-  if (!validateGPTResult(parsed)) {
-    throw new Error(
-      "Validation failed:\n" + JSON.stringify(parsed, null, 2)
-    );
+  parsed.circuitId = circuitId;
+
+  /* =========================
+     HIERARCHY RESOLUTION
+  ========================= */
+
+  const hierarchy = resolveHierarchy(parsed.subSubCategory);
+
+  if (!hierarchy) {
+    return buildEmptyResult(parsed.confidence);
   }
+
+  parsed.caseReasonCategory = hierarchy.caseReasonCategory;
+  parsed.subCategory = hierarchy.subCategory;
+  parsed.priority = getPriority(hierarchy.caseReasonCategory);
 
   return parsed;
+}
+
+/* =====================================================
+   SAFE EMPTY RESULT BUILDER
+===================================================== */
+
+function buildEmptyResult(confidence = 0) {
+  return {
+    isIssue: false,
+    circuitId: null,
+    caseReasonCategory: null,
+    subCategory: null,
+    subSubCategory: null,
+    priority: "Medium",
+    summary: null,
+    confidence,
+    manualReview: false
+  };
 }

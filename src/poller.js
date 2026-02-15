@@ -1,91 +1,43 @@
-// import { fetchInboxEmails, tagMessage } from "./outlook.js";
-// import { enqueue } from "./utils/queue.js";
+import {
+  fetchInboxEmails,
+  tagMessage,
+} from "./outlook.js";
 
-// export async function pollInbox() {
-//   const emails = await fetchInboxEmails();
-
-//   const skipTags = [
-//     "H8-QUEUED",
-//     "H8-PROCESSED",
-//     "H8-FAILED",
-//     "H8-OTHER",
-//     "H8-MANUAL"
-//   ];
-
-//   for (const mail of emails) {
-//     if (mail.categories?.some(tag => skipTags.includes(tag))) continue;
-
-//     enqueue(mail);
-//     await tagMessage(mail.id, "H8-QUEUED");
-//   }
-
-//   console.log(`📨 Enqueued ${emails.length} emails`);
-// }
-
-
-
-import { fetchInboxEmails, tagMessage } from "./outlook.js";
 import { enqueue } from "./utils/queue.js";
 
+let polling = false;
+
 export async function pollInbox() {
-  const emails = await fetchInboxEmails();
+  if (polling) return;
+  polling = true;
 
-  const skipTags = [
-    "H8-QUEUED",
-    "H8-PROCESSED",
-    "H8-FAILED",
-    "H8-OTHER",
-    "H8-MANUAL"
-  ];
+    try {
+      const emails = await fetchInboxEmails();
 
-  let enqueuedCount = 0;
+      if (!emails.length) {
+        console.log("📭 No new emails");
+        return;
+      }
 
-  for (const mail of emails) {
-    if (mail.categories?.some(tag => skipTags.includes(tag))) continue;
+      let enqueuedCount = 0;
+      let latestTimestamp = null;
+      for (const mail of emails) {
+        enqueue(mail);
+        await tagMessage(mail.id, "H8-QUEUED");
 
-    enqueue(mail);
-    await tagMessage(mail.id, "H8-QUEUED");
-    enqueuedCount++;
+        enqueuedCount++;
+
+        // Track newest timestamp processed
+        if (
+          !latestTimestamp ||
+          new Date(mail.receivedDateTime) > new Date(latestTimestamp)
+        ) {
+          latestTimestamp = mail.receivedDateTime;
+        }
+      }
+    } catch (err) {
+      console.error("❌ Polling failed:", err.message);
+    } finally {
+      polling = false;
+    }
   }
-
-  console.log(`📨 Enqueued ${enqueuedCount} new emails`);
-}
-
-
-
-// import { fetchInboxEmails } from "./outlook.js";
-// import { classifyEmailWithGPT } from "./gpt/classify.js";
-// import { sanitizeForAspNet } from "./utils/sanitizeText.js";
-
-// export async function pollInbox() {
-//   const emails = await fetchInboxEmails();
-
-//   console.log(`📥 Total emails fetched: ${emails.length}`);
-
-//   const firstFive = emails.slice(0, 50);
-
-//   for (const mail of firstFive) {
-
-//     const cleanBody = sanitizeForAspNet(mail.bodyText);
-
-//     console.log("\n==================================================");
-//     console.log("📧 SUBJECT:");
-//     console.log(mail.subject);
-
-//     console.log("\n📝 BODY (SANITIZED TEXT SENT TO GPT):");
-//     console.log(cleanBody);
-
-//     console.log("\n🤖 Calling GPT...\n");
-
-//     const gpt = await classifyEmailWithGPT({
-//       subject: mail.subject,
-//       body: cleanBody
-//     });
-
-//     console.log("🧠 GPT OUTPUT:");
-//     console.log(JSON.stringify(gpt, null, 2));
-//   }
-
-//   console.log("\n🛑 DEBUG TEST COMPLETE");
-//   process.exit(0);
-// }

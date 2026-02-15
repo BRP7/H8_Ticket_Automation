@@ -1,6 +1,9 @@
 import { generateTodaySummary } from "./summaryGenerator.js";
 import { sendNewMail } from "../outlook.js";
 
+let lastSummarySentDate = null;
+
+
 /**
  * Runs daily at 6:00 PM IST
  */
@@ -16,8 +19,12 @@ export function startDailySummaryScheduler() {
         hour12: false
       });
 
+      const todayIST = now.toLocaleDateString("en-CA", {
+        timeZone: "Asia/Kolkata"
+      });
+
       // Trigger at 18:00 (6PM IST)
-      if (istTime.startsWith("18:00")) {
+      if (istTime.startsWith("18:00") && lastSummarySentDate !== todayIST) {
 
         console.log("📊 Generating Daily Summary...");
 
@@ -32,11 +39,12 @@ export function startDailySummaryScheduler() {
 
         await sendNewMail({
           to: process.env.DAILY_SUMMARY,
-          subject: `📊 H8 Daily Ticket Summary - ${summary.date}`,
+          subject: `H8 Daily Ticket Summary - ${summary.date}`,
           html
         });
 
         console.log("✅ Daily summary sent successfully");
+        lastSummarySentDate = todayIST;
       }
 
     } catch (err) {
@@ -49,7 +57,7 @@ export function startDailySummaryScheduler() {
 /**
  * Build HTML summary
  */
-function buildSummaryHTML(summary) {
+export function buildSummaryHTML(summary) {
   return `
     <h2>H8 Daily Summary - ${summary.date}</h2>
 

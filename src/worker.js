@@ -1,30 +1,68 @@
-// import { dequeue, getQueueLength } from "./utils/queue.js";
+// import {
+//   dequeue,
+//   removeById,
+//   incrementAttempt
+// } from "./utils/queue.js";
+
 // import { classifyEmailWithGPT } from "./gpt/classify.js";
-// // import { applyKeywordBackMapping } from "./gpt/keywordEngine.js";
 // import { createH8Ticket } from "./h8.js";
-// import { tagMessage, replyToMessage } from "./outlook.js";
+
+// import {
+//   tagMessage,
+//   replyToMessage,
+//   createDraftReply,
+//   sendNewMail
+// } from "./outlook.js";
+
 // import { logHistory } from "./utils/historyLogger.js";
 // import { getTestCircuitId } from "./utils/testCircuitManager.js";
-// import { mapToTicketCategory } from "./gpt/keywordEngine.js";
 
+// import {
+//   ticketFailureTemplate,
+//   manualReviewTemplate
+// } from "./utils/emailTemplates.js";
 
-// const MAX_CONCURRENT = parseInt(process.env.MAX_CONCURRENT_WORKERS || "5");
-// const RETRY_LIMIT = 2;
+// import { ackSuccessTemplate } from "./utils/clientAckTemplates.js";
+// import { withRetry } from "./utils/retry.js";
+// import { writeLog } from "./utils/logger.js";
+
+// /* =====================================================
+//    🔥 DYNAMIC CONCURRENCY CONTROLLER
+// ===================================================== */
+
+// const MAX_WORKERS = parseInt(process.env.MAX_CONCURRENT_WORKERS || "3");
+// const MIN_WORKERS = 1;
+
+// let dynamicConcurrency = MAX_WORKERS;
+// let networkFailures = 0;
+
+// /* ===================================================== */
+
+// const TAGS = {
+//   PROCESSED: "H8-PROCESSED",
+//   OTHER: "H8-OTHER",
+//   MANUAL: "H8-MANUAL",
+//   FAILED: "H8-FAILED",
+//   DUPLICATE: "H8-DUPLICATE"
+// };
 
 // let active = 0;
 // let running = false;
+// let consecutiveFailures = 0;
+// const MAX_FAILURES = 5;
+
+// /* ===================================================== */
 
 // export function startWorker() {
 //   if (running) return;
 //   running = true;
 
-//   console.log(`🧵 Worker started with concurrency: ${MAX_CONCURRENT}`);
-
-//   setInterval(processQueue, 500);
+//   console.log(`🧵 Worker started with max concurrency: ${MAX_WORKERS}`);
+//   setInterval(processQueue, 3000);
 // }
 
 // async function processQueue() {
-//   if (active >= MAX_CONCURRENT) return;
+//   if (active >= dynamicConcurrency) return;
 
 //   const job = dequeue();
 //   if (!job) return;
@@ -38,104 +76,237 @@
 //     });
 // }
 
+// /* ===================================================== */
+
 // async function handleJob(job) {
-//   let attempt = 0;
+//   const clientEmail = job.from?.emailAddress?.address || "unknown";
 
-//   while (attempt <= RETRY_LIMIT) {
-//     try {
-//       console.log(`🔵 Processing: ${job.subject}`);
+//   // try {
+//   //   console.log("=================================================");
+//   //   console.log("🚀 STARTING JOB:", job.id);
+//   //   console.log("🔵 Processing:", job.subject);
 
-//       // 1️⃣ GPT detection only
-//       const gpt = await classifyEmailWithGPT({
-//         subject: job.subject,
-//         body: job.bodyText
-//       });
+// const safeSubject = job.subject || "";
+// const safeBody = job.bodyText || "";
 
-//       if (!gpt.isIssue) {
-//         await tagMessage(job.id, "H8-OTHER");
-//         await logHistory(job, gpt, "NOT_ISSUE");
-//         return;
-//       }
+// const result = await classifyEmailWithGPT({
+//   subject: safeSubject,
+//   body: safeBody,
+//   from: clientEmail
+// });
 
-//       // 2️⃣ Deterministic mapping
-//       const mapping = mapToTicketCategory(job, gpt);
+// console.log('result',result);
+// console.log('body',safeBody);
+// console.log('sub',safeSubject);
 
-//       let finalTicket;
+//     // console.log("CLEAN BODY:\n", job.bodyText);
 
-//       if (mapping) {
-//         finalTicket = {
-//           ...gpt,
-//           ...mapping
-//         };
-//       }
-//       else if (gpt.circuitId) {
-//         // fallback rule
-//         finalTicket = {
-//           ...gpt,
-//           caseReasonCategory: "Service Affecting",
-//           subCategory: "Link Down",
-//           subSubCategory: "Link Hard Down",
-//           priority: "High"
-//         };
-//       }
-//       else {
-//         await tagMessage(job.id, "H8-MANUAL");
-//         await logHistory(job, gpt, "NO_CATEGORY_NO_CIRCUIT");
-//         return;
-//       }
+//     // console.log("GPT RESULT:", JSON.stringify(result, null, 2));
 
-//       // 3️⃣ TEST MODE circuit override
-//       if (process.env.APP_MODE === "TEST") {
-//         finalTicket.circuitId = getTestCircuitId();
-//         console.log("🧪 TEST MODE - Circuit overridden:", finalTicket.circuitId);
-//       }
 
-//       if (!finalTicket.circuitId) {
-//         await tagMessage(job.id, "H8-MANUAL");
-//         await logHistory(job, finalTicket, "NO_CIRCUIT");
-//         return;
-//       }
-
-//       // 4️⃣ Create ticket
-//       const ticketId = await createH8Ticket({
-//         ...finalTicket,
-//         originalEmailBody: job.bodyText
-//       });
-
-//       console.log("✅ Ticket created:", ticketId);
-
-//       // 5️⃣ Reply ONLY in PROD
-//       if (
-//         process.env.APP_MODE === "PROD" &&
-//         job.from?.emailAddress?.address
-//       ) {
-//         await replyToMessage(
-//           job.id,
-//           `<b>Ticket Created:</b> ${ticketId}<br/>Our team is investigating.`
-//         );
-//       }
-
-//       // 6️⃣ Log success
-//       await logHistory(job, finalTicket, "SUCCESS", ticketId);
-
-//       // 7️⃣ Tag processed
-//       await tagMessage(job.id, "H8-PROCESSED");
-
+//     if (!result.isIssue) {
+//       // await tagMessage(job.id, TAGS.OTHER);
+//       await logHistory(job, result, "NOT_ISSUE");
+//       removeById(job.id);
 //       return;
-
-//     } catch (err) {
-//       attempt++;
-//       console.error(`⚠ Attempt ${attempt} failed`, err.message);
-
-//       if (attempt > RETRY_LIMIT) {
-//         await tagMessage(job.id, "H8-FAILED");
-//         await logHistory(job, null, "FAILED_EXCEPTION");
-//         return;
-//       }
-
-//       await new Promise(r => setTimeout(r, 2000));
 //     }
-//   }
+
+//     if (!result.subSubCategory) {
+//       // await tagMessage(job.id, TAGS.OTHER);
+//       removeById(job.id);
+//       return;
+//     }
+//     /* ================= MANUAL REVIEW ================= */
+
+//     // if (result.manualReview) {
+//     //   console.log('result',result);
+//     //   writeLog({
+//     //     type: "MANUAL_REVIEW",
+//     //     subject: job.subject,
+//     //     circuitId: result.circuitId,
+//     //     subSubCategory: result.subSubCategory,
+//     //     confidence: result.confidence
+//     //   });
+
+//     //   await tagMessage(job.id, TAGS.MANUAL);
+//     //   await logHistory(job, result, "MANUAL_REVIEW");
+
+//     //   const reason = !result.circuitId
+//     //     ? "Circuit ID missing in email."
+//     //     : "Ambiguous classification requiring validation.";
+
+//     //   const mail = manualReviewTemplate({
+//     //     subject: job.subject,
+//     //     from: clientEmail,
+//     //     circuitId: result.circuitId,
+//     //     subSubCategory: result.subSubCategory,
+//     //     confidence: result.confidence,
+//     //     reason
+//     //   });
+
+//     //   await sendNewMail({
+//     //     to: process.env.FAILURE_NOTIFY,
+//     //     subject: mail.subject,
+//     //     html: mail.html
+//     //   });
+
+//     //   removeById(job.id);
+//     //   return;
+//     // }
+
+//     writeLog({
+//       level: "debug",
+//       type: "GPT_INPUT",
+//       messageId: job.id,
+//       subject: job.subject,
+//       body: job.bodyText
+//     });
+
+//     writeLog({
+//       level: "debug",
+//       type: "GPT_RESULT",
+//       messageId: job.id,
+//       result
+//     });
+
+
+// //     /* ================= TEST MODE ================= */
+
+// //     if (process.env.APP_MODE === "TEST") {
+// //       console.log("real extracted circuit id", result.circuitId);
+// //       result.circuitId = getTestCircuitId();
+// //       console.log("test circuit id", result.circuitId);
+// //     }
+
+// //     /* ================= CREATE TICKET ================= */
+// //     let ticketId;
+// //      if (process.env.APP_MODE === "TEST") { 
+// //       ticketId = "PRECHECK-" + Date.now(); 
+// //       console.log("🧪 TEST MODE – FAKE TICKET:", ticketId); 
+// //     } else {
+// //     // const ticketId = await withRetry(
+// //       ticketId = await withRetry(
+// //       () =>
+// //         createH8Ticket({
+// //           ...result,
+// //           originalEmailBody: job.bodyText,
+// //           subject: job.subject,
+// //           from: clientEmail
+// //         }),
+// //       {
+// //         retries: 3,
+// //         delayMs: 5000,
+// //         onRetry: (err, attempt) => {
+// //           if (err.code === "DUPLICATE_CASE") throw err;
+// //           console.log(`🔁 Retry ${attempt}:`, err.message);
+// //           incrementAttempt(job.id);
+// //         }
+// //       }
+// //     );
+// //   }
+// //     /* ================= SUCCESS LOG ================= */
+
+// //     writeLog({
+// //       type: "TICKET_CREATED",
+// //       subject: job.subject,
+// //       ticketId,
+// //       circuitId: result.circuitId,
+// //       subSubCategory: result.subSubCategory,
+// //       confidence: result.confidence
+// //     });
+
+// //     await tagMessage(job.id, TAGS.PROCESSED);
+
+// //     const ack = ackSuccessTemplate({
+// //       ticketId,
+// //       circuitId: result.circuitId,
+// //       bookedAt: new Date().toLocaleString("en-IN", {
+// //         timeZone: "Asia/Kolkata"
+// //       })
+// //     });
+
+// //     if (process.env.APP_MODE === "TEST") {
+// //       // await replyToMessage(job.id, ack.html);
+// //       await createDraftReply(job.id, ack.html);
+
+// //     } else {
+// //       await sendNewMail({
+// //         to: process.env.TEST_REPLY_EMAIL,
+// //         subject: ack.subject,
+// //         html: ack.html
+// //       });
+// //     }
+
+// //     /* ================= AUTO SCALE UP ================= */
+
+// //     networkFailures = 0;
+
+// //     if (dynamicConcurrency < MAX_WORKERS) {
+// //       dynamicConcurrency++;
+// //       console.log(`✅ Stable. Increasing workers to ${dynamicConcurrency}`);
+// //     }
+
+// //     consecutiveFailures = 0;
+// //     removeById(job.id);
+
+// //   } catch (err) {
+
+// //     if (err.code === "DUPLICATE_CASE") {
+// //       await tagMessage(job.id, TAGS.DUPLICATE);
+// //       removeById(job.id);
+// //       return;
+// //     }
+
+// //     console.error("❌ JOB FAILED:", err.message);
+
+// //     writeLog({
+// //       type: "ERROR",
+// //       subject: job.subject,
+// //       error: err.message
+// //     });
+
+// //     await tagMessage(job.id, TAGS.FAILED);
+
+// //     const failureTemplate = ticketFailureTemplate({
+// //       circuitId: "UNKNOWN",
+// //       error: err.message,
+// //       subject: job.subject
+// //     });
+
+// //     await sendNewMail({
+// //       to: process.env.FAILURE_NOTIFY,
+// //       subject: failureTemplate.subject,
+// //       html: failureTemplate.html
+// //     });
+
+// //     /* ================= AUTO SCALE DOWN ================= */
+
+// //     if (
+// //       err.message.includes("fetch failed") ||
+// //       err.message.includes("Connection error") ||
+// //       err.code === "TypeError"
+// //     ) {
+// //       networkFailures++;
+
+// //       if (networkFailures >= 3 && dynamicConcurrency > MIN_WORKERS) {
+// //         dynamicConcurrency--;
+// //         networkFailures = 0;
+
+// //         console.log(
+// //           `⚠ High network errors. Reducing workers to ${dynamicConcurrency}`
+// //         );
+// //       }
+// //     }
+
+// //     consecutiveFailures++;
+
+// //     if (consecutiveFailures >= MAX_FAILURES) {
+// //       console.error("🚨 CIRCUIT BREAKER TRIGGERED");
+// //       process.exit(1);
+// //     }
+
+// //     removeById(job.id);
+// //   }
 // }
 
 
@@ -149,42 +320,92 @@ import {
 
 import { classifyEmailWithGPT } from "./gpt/classify.js";
 import { createH8Ticket } from "./h8.js";
+
 import {
   tagMessage,
   replyToMessage,
-  sendNewMail
+  createDraftReply
 } from "./outlook.js";
 
 import { logHistory } from "./utils/historyLogger.js";
-import { getTestCircuitId } from "./utils/testCircuitManager.js";
+import { withRetry } from "./utils/retry.js";
+import { writeLog } from "./utils/logger.js";
 
 import {
-  ticketSuccessTemplate,
   ticketFailureTemplate
 } from "./utils/emailTemplates.js";
 
-import {
-  ackSuccessTemplate
-} from "./utils/clientAckTemplates.js";
+import { ackSuccessTemplate } from "./utils/clientAckTemplates.js";
 
-import { withRetry } from "./utils/retry.js";
+/* =====================================================
+   ENV CONFIG
+===================================================== */
 
-const MAX_CONCURRENT =
-  parseInt(process.env.MAX_CONCURRENT_WORKERS || "5");
+const MAX_WORKERS = parseInt(process.env.MAX_CONCURRENT_WORKERS || "3");
+const MIN_WORKERS = 1;
+
+const APP_MODE = process.env.APP_MODE || "TEST"; // TEST | PROD
+const AUTO_SEND = process.env.AUTO_SEND_REPLY === "true";
+const WORKER_ENABLED = process.env.WORKER_ENABLED !== "false";
+
+/* =====================================================
+   TAGS
+===================================================== */
+
+const TAGS = {
+  PROCESSED: "H8-PROCESSED",
+  OTHER: "H8-OTHER",
+  FAILED: "H8-FAILED",
+  DUPLICATE: "H8-DUPLICATE"
+};
+
+/* =====================================================
+   WORKER STATE
+===================================================== */
 
 let active = 0;
 let running = false;
 
+let dynamicConcurrency = MAX_WORKERS;
+let networkFailures = 0;
+let consecutiveFailures = 0;
+
+const MAX_FAILURES = 5;
+
+/* =====================================================
+   START WORKER
+===================================================== */
+
 export function startWorker() {
+  if (!WORKER_ENABLED) {
+    writeLog({
+      level: "warn",
+      type: "WORKER_DISABLED",
+      message: "Worker disabled via env flag."
+    });
+    return;
+  }
+
   if (running) return;
   running = true;
 
-  console.log(`🧵 Worker started with concurrency: ${MAX_CONCURRENT}`);
-  setInterval(processQueue, 500);
+  writeLog({
+    level: "info",
+    type: "WORKER_STARTED",
+    concurrency: MAX_WORKERS,
+    mode: APP_MODE,
+    autoSend: AUTO_SEND
+  });
+
+  setInterval(processQueue, 3000);
 }
 
+/* =====================================================
+   QUEUE PROCESSOR
+===================================================== */
+
 async function processQueue() {
-  if (active >= MAX_CONCURRENT) return;
+  if (active >= dynamicConcurrency) return;
 
   const job = dequeue();
   if (!job) return;
@@ -192,275 +413,206 @@ async function processQueue() {
   active++;
 
   handleJob(job)
-    .catch(err => console.error("Unhandled worker error:", err))
+    .catch(err => {
+      writeLog({
+        level: "error",
+        type: "UNHANDLED_WORKER_ERROR",
+        error: err.message
+      });
+    })
     .finally(() => {
       active--;
     });
 }
 
-// async function handleJob(job) {
-//   try {
-//     console.log(`🔵 Processing: ${job.subject}`);
-
-//     // 1️⃣ GPT Classification (validated inside classify.js)
-//     const result = await classifyEmailWithGPT({
-//       subject: job.subject,
-//       body: job.bodyText,
-//       from: job.from?.emailAddress?.address
-//     });
-
-//     // 2️⃣ Not an issue
-//     if (!result.isIssue) {
-//       await tagMessage(job.id, "H8-OTHER");
-//       await logHistory(job, result, "NOT_ISSUE");
-//       removeById(job.id);
-//       return;
-//     }
-
-//     if (result.isIssue && !result.circuitId) {
-//       await tagMessage(job.id, "H8-MANUAL");
-//       await logHistory(job, result, "NO_CIRCUIT");
-//       removeById(job.id);
-//       return;
-//     }
-
-//     // 3️⃣ TEST MODE Circuit Override
-//     if (process.env.APP_MODE === "TEST") {
-//       result.circuitId = getTestCircuitId();
-//       console.log("🧪 TEST MODE - Circuit overridden:", result.circuitId);
-//     }
-
-//     // 4️⃣ Ticket Creation (with retry)
-//     const ticketId = await withRetry(
-//       () =>
-//         createH8Ticket({
-//           ...result,
-//           originalEmailBody: job.bodyText
-//         }),
-//       {
-//         retries: 3,
-//         delayMs: 5000,
-//         onRetry: (err, attempt) => {
-//           console.log(`⚠ Retry ${attempt}`, err.message);
-//           incrementAttempt(job.id);
-//         }
-//       }
-//     );
-
-//     console.log("✅ Ticket created:", ticketId);
-
-//     // ====================================================
-//     // 🔔 INTERNAL SUCCESS NOTIFICATION (ALWAYS)
-//     // ====================================================
-//     const internalTemplate = ticketSuccessTemplate({
-//       ticketId,
-//       circuitId: result.circuitId
-//     });
-
-//     await sendNewMail({
-//       to: process.env.SUCCESS_NOTIFY,
-//       subject: internalTemplate.subject,
-//       html: internalTemplate.html
-//     });
-
-//     // ====================================================
-//     // 📧 CLIENT ACK
-//     // ====================================================
-
-//     const clientTemplate = ackSuccessTemplate({
-//       ticketId,
-//       circuitId: result.circuitId,
-//       bookedAt: new Date().toLocaleString()
-//     });
-
-//     if (process.env.APP_MODE === "PROD") {
-//       // Reply in same thread
-//       await replyToMessage(job.id, clientTemplate.html);
-//     } else {
-//       // TEST → send to static test email (new mail)
-//       await sendNewMail({
-//         to: process.env.TEST_REPLY_EMAIL,
-//         subject: clientTemplate.subject,
-//         html: clientTemplate.html
-//       });
-//     }
-
-//     // 5️⃣ Log success
-//     await logHistory(job, result, "SUCCESS", ticketId);
-
-//     // 6️⃣ Tag processed
-//     await tagMessage(job.id, "H8-PROCESSED");
-
-//     // 7️⃣ Remove from queue
-//     removeById(job.id);
-
-//   } catch (err) {
-
-//     console.error("❌ Ticket creation failed:", err.message);
-
-//     // ====================================================
-//     // 🔔 INTERNAL FAILURE NOTIFICATION (ALWAYS)
-//     // ====================================================
-//     const failureTemplate = ticketFailureTemplate({
-//       circuitId: "UNKNOWN",
-//       error: err.message
-//     });
-
-//     await sendNewMail({
-//       to: process.env.FAILURE_NOTIFY,
-//       subject: failureTemplate.subject,
-//       html: failureTemplate.html
-//     });
-
-//     await tagMessage(job.id, "H8-FAILED");
-//     await logHistory(job, null, "FAILED_EXCEPTION");
-
-//     removeById(job.id);
-//   }
-// }
-
+/* =====================================================
+   MAIN JOB HANDLER
+===================================================== */
 
 async function handleJob(job) {
+  const clientEmail = job.from?.emailAddress?.address || "unknown";
+
   try {
-    console.log("=================================================");
-    console.log("🔵 Processing:", job.subject);
+    const safeSubject = job.subject || "";
+    const safeBody = job.bodyText || "";
+
+    /* ================= GPT CLASSIFICATION ================= */
 
     const result = await classifyEmailWithGPT({
-      subject: job.subject,
-      body: job.bodyText,
-      from: job.from?.emailAddress?.address
+      subject: safeSubject,
+      body: safeBody,
+      from: clientEmail
     });
 
-    console.log("🧠 GPT RESULT:", JSON.stringify(result, null, 2));
+    writeLog({
+      level: "debug",
+      type: "GPT_RESULT",
+      messageId: job.id,
+      result
+    });
 
-    // ==========================
-    // 🟡 NOT ISSUE
-    // ==========================
-    if (!result.isIssue) {
-      await tagMessage(job.id, "H8-OTHER");
+    /* ================= NOT ISSUE ================= */
+
+    if (!result.isIssue || !result.subSubCategory) {
+      await tagMessage(job.id, TAGS.OTHER);
       await logHistory(job, result, "NOT_ISSUE");
       removeById(job.id);
       return;
     }
 
-    // ==========================
-    // 🟠 MANUAL REVIEW
-    // ==========================
-    if (!result.circuitId) {
+    /* ================= CREATE TICKET ================= */
 
-      const manualTemplate = ticketFailureTemplate({
-        circuitId: "UNKNOWN",
-        error: "Issue detected but circuit ID missing."
+    let ticketId;
+
+    if (APP_MODE === "TEST") {
+      ticketId = "PRECHECK-" + Date.now();
+
+      writeLog({
+        level: "info",
+        type: "TEST_TICKET_CREATED",
+        ticketId,
+        circuitId: result.circuitId
       });
+    } else {
+      ticketId = await withRetry(
+        () =>
+          createH8Ticket({
+            ...result,
+            originalEmailBody: job.bodyText,
+            subject: job.subject,
+            from: clientEmail
+          }),
+        {
+          retries: 3,
+          delayMs: 5000,
+          onRetry: (err, attempt) => {
+            writeLog({
+              level: "warn",
+              type: "TICKET_RETRY",
+              attempt,
+              error: err.message
+            });
+            incrementAttempt(job.id);
+          }
+        }
+      );
+    }
 
-      await sendNewMail({
-        to: process.env.FAILURE_NOTIFY,
-        subject: manualTemplate.subject,
-        html: manualTemplate.html
+    /* ================= SUCCESS LOG ================= */
+
+    writeLog({
+      level: "info",
+      type: "TICKET_CREATED",
+      ticketId,
+      circuitId: result.circuitId,
+      subSubCategory: result.subSubCategory,
+      confidence: result.confidence
+    });
+
+    await tagMessage(job.id, TAGS.PROCESSED);
+
+    /* ================= ACK RESPONSE ================= */
+
+    const ack = ackSuccessTemplate({
+      ticketId,
+      circuitId: result.circuitId,
+      bookedAt: new Date().toLocaleString("en-IN", {
+        timeZone: "Asia/Kolkata"
+      })
+    });
+
+    if (AUTO_SEND) {
+      await replyToMessage(job.id, ack.html);
+
+      writeLog({
+        level: "info",
+        type: "AUTO_REPLY_SENT",
+        ticketId
       });
+    } else {
+      await createDraftReply(job.id, ack.html);
 
-      await tagMessage(job.id, "H8-MANUAL");
-      await logHistory(job, result, "NO_CIRCUIT");
+      writeLog({
+        level: "info",
+        type: "DRAFT_CREATED",
+        ticketId
+      });
+    }
+
+    /* ================= AUTO SCALE UP ================= */
+
+    networkFailures = 0;
+    consecutiveFailures = 0;
+
+    if (dynamicConcurrency < MAX_WORKERS) {
+      dynamicConcurrency++;
+    }
+
+    await logHistory(job, result, "TICKET_CREATED");
+    removeById(job.id);
+
+  } catch (err) {
+
+    /* ================= DUPLICATE ================= */
+
+    if (err.code === "DUPLICATE_CASE") {
+      await tagMessage(job.id, TAGS.DUPLICATE);
       removeById(job.id);
       return;
     }
 
-    // ==========================
-    // 🧪 TEST MODE override
-    // ==========================
-    if (process.env.APP_MODE === "TEST") {
-      result.circuitId = getTestCircuitId();
-    }
-
-    // ==========================
-    // 🎫 CREATE REAL TICKET
-    // ==========================
-    const ticketId = await withRetry(
-      () =>
-        createH8Ticket({
-          ...result,
-          originalEmailBody: job.bodyText
-        }),
-      {
-        retries: 3,
-        delayMs: 5000,
-        onRetry: (err, attempt) => {
-          console.log(`⚠ Retry ${attempt}`, err.message);
-          incrementAttempt(job.id);
-        }
-      }
-    );
-
-    console.log("✅ Ticket created:", ticketId);
-
-    // ==========================
-    // 🔔 INTERNAL SUCCESS (ALWAYS)
-    // ==========================
-    const successTemplate = ticketSuccessTemplate({
-      ticketId,
-      circuitId: result.circuitId
+    writeLog({
+      level: "error",
+      type: "JOB_FAILED",
+      error: err.message,
+      subject: job.subject
     });
 
-    await sendNewMail({
-      to: process.env.SUCCESS_NOTIFY,
-      subject: successTemplate.subject,
-      html: successTemplate.html
+    await tagMessage(job.id, TAGS.FAILED);
+
+    /* ================= FAILURE EMAIL ================= */
+
+    const failureTemplate = ticketFailureTemplate({
+      circuitId: "UNKNOWN",
+      error: err.message,
+      subject: job.subject
     });
 
-    // ==========================
-    // 📧 CLIENT ACK (ONLY PROD)
-    // ==========================
-    if (process.env.APP_MODE === "PROD") {
-      const clientTemplate = ackSuccessTemplate({
-        ticketId,
-        circuitId: result.circuitId,
-        bookedAt: new Date().toLocaleString()
-      });
-
-      await replyToMessage(job.id, clientTemplate.html);
+    if (process.env.FAILURE_NOTIFY) {
+      await createDraftReply(job.id, failureTemplate.html);
     }
 
-    // ==========================
-    // 🧾 LOG
-    // ==========================
-    await logHistory(job, result, "SUCCESS", ticketId);
-    await tagMessage(job.id, "H8-PROCESSED");
-    removeById(job.id);
+    /* ================= AUTO SCALE DOWN ================= */
 
-    // ==========================
-    // 📊 TEST MODE SUMMARY (PER TICKET)
-    // ==========================
-    if (process.env.APP_MODE === "TEST") {
-      const { generateTodaySummary } = await import("./utils/summaryGenerator.js");
-      const summary = generateTodaySummary();
+    if (
+      err.message.includes("fetch failed") ||
+      err.message.includes("Connection error") ||
+      err.code === "TypeError"
+    ) {
+      networkFailures++;
 
-      if (summary) {
-        await sendNewMail({
-          to: process.env.DAILY_SUMMARY,
-          subject: `🧪 TEST SUMMARY - ${summary.date}`,
-          html: `<pre>${JSON.stringify(summary, null, 2)}</pre>`
+      if (networkFailures >= 3 && dynamicConcurrency > MIN_WORKERS) {
+        dynamicConcurrency--;
+        networkFailures = 0;
+
+        writeLog({
+          level: "warn",
+          type: "SCALE_DOWN",
+          newConcurrency: dynamicConcurrency
         });
       }
     }
 
-  } catch (err) {
+    consecutiveFailures++;
 
-    console.error("❌ Worker failed:", err.message);
+    if (consecutiveFailures >= MAX_FAILURES) {
+      writeLog({
+        level: "fatal",
+        type: "CIRCUIT_BREAKER_TRIGGERED"
+      });
+      process.exit(1);
+    }
 
-    const failureTemplate = ticketFailureTemplate({
-      circuitId: "UNKNOWN",
-      error: err.message
-    });
-
-    await sendNewMail({
-      to: process.env.FAILURE_NOTIFY,
-      subject: failureTemplate.subject,
-      html: failureTemplate.html
-    });
-
-    await tagMessage(job.id, "H8-FAILED");
-    await logHistory(job, null, "FAILED_EXCEPTION");
     removeById(job.id);
   }
 }
-
