@@ -4,40 +4,72 @@ import {
 } from "./outlook.js";
 
 import { enqueue } from "./utils/queue.js";
+import { writeLog } from "./utils/logger.js";
 
 let polling = false;
 
+/* =====================================================
+   POLL INBOX
+===================================================== */
+
 export async function pollInbox() {
   if (polling) return;
+
   polling = true;
 
-    try {
-      const emails = await fetchInboxEmails();
+  try {
+    const emails = await fetchInboxEmails();
 
-      if (!emails.length) {
-        console.log("📭 No new emails");
-        return;
-      }
+    if (!emails || emails.length === 0) {
+      writeLog({
+        level: "debug",
+        type: "POLL_EMPTY",
+        message: "No new emails"
+      });
+      return;
+    }
 
-      let enqueuedCount = 0;
-      let latestTimestamp = null;
-      for (const mail of emails) {
+    let enqueuedCount = 0;
+
+    for (const mail of emails) {
+      try {
         enqueue(mail);
+
         await tagMessage(mail.id, "H8-QUEUED");
 
         enqueuedCount++;
 
-        // Track newest timestamp processed
-        if (
-          !latestTimestamp ||
-          new Date(mail.receivedDateTime) > new Date(latestTimestamp)
-        ) {
-          latestTimestamp = mail.receivedDateTime;
-        }
+        writeLog({
+          level: "info",
+          type: "MAIL_ENQUEUED",
+          messageId: mail.id,
+          subject: mail.subject,
+          from: mail.from?.emailAddress?.address || "unknown"
+        });
+
+      } catch (err) {
+        writeLog({
+          level: "error",
+          type: "MAIL_ENQUEUE_FAILED",
+          messageId: mail.id,
+          error: err.message
+        });
       }
-    } catch (err) {
-      console.error("❌ Polling failed:", err.message);
-    } finally {
-      polling = false;
     }
+
+    writeLog({
+      level: "info",
+      type: "POLL_COMPLETED",
+      message: `Enqueued ${enqueuedCount} emails`
+    });
+
+  } catch (err) {
+    writeLog({
+      level: "error",
+      type: "POLL_FAILED",
+      message: err.message
+    });
+  } finally {
+    polling = false;
   }
+}

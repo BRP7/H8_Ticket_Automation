@@ -1,22 +1,3 @@
-// export function ackSuccessTemplate({ ticketId, circuitId }) {
-//   return {
-//     subject: `ACK: Ticket Created – ${ticketId}`,
-//     html: `
-//       <p>Dear Customer,</p>
-
-//       <p>We have received your request regarding the following circuit:</p>
-
-//       <p><b>Circuit ID:</b> ${circuitId}<br/>
-//       <b>Ticket ID:</b> ${ticketId}</p>
-
-//       <p>Our support team is working on this issue.</p>
-
-//       <p>Regards,<br/>
-//       Optimal Telemedia Support Team</p>
-//     `,
-//   };
-// }
-
 
 export function ackSuccessTemplate({
   ticketId,

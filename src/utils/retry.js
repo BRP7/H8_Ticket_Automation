@@ -1,32 +1,3 @@
-// // src/utils/retry.js
-
-// export async function withRetry(fn, options = {}) {
-//   const {
-//     retries = 3,
-//     delayMs = 5000,
-//     onRetry = () => {},
-//   } = options;
-
-//   let attempt = 0;
-
-//   while (true) {
-//     try {
-//       attempt++;
-//       return await fn();
-//     } catch (err) {
-//       if (attempt >= retries) {
-//         throw err;
-//       }
-
-//       onRetry(err, attempt);
-
-//       await new Promise(res => setTimeout(res, delayMs));
-//     }
-//   }
-// }
-
-
-
 import { isRetryableError } from "./errorClassifier.js";
 
 export async function withRetry(fn, options = {}) {
@@ -56,10 +27,13 @@ export async function withRetry(fn, options = {}) {
         maxDelayMs
       );
 
-      console.log(`🔁 Retry ${attempt} in ${delay}ms`);
+      console.log(`🔁 Retry ${attempt}/${retries} in ${delay}ms`);
       onRetry(err, attempt);
 
       await new Promise(res => setTimeout(res, delay));
     }
   }
+
+  // Should never reach here
+  throw new Error("withRetry: Unexpected exit");
 }
