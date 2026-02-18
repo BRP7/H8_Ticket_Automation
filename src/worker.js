@@ -8,8 +8,7 @@ import { classifyEmailWithGPT } from "./gpt/classify.js";
 import { createH8Ticket } from "./h8.js";
 import { getTestCircuitId } from "./utils/testCircuitManager.js";
 
-import { extractCircuitId } from "./gpt/classify.js"; // export it
-
+import { extractCircuitId } from "./gpt/classify.js";
 import {
   tagMessage,
   replyToMessage,
