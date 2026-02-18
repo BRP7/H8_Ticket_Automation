@@ -34,13 +34,36 @@ function get24HoursAgoUTC() {
   return past.toISOString();
 }
 
+function getRolloutSinceUTC() {
+  const rolloutHour = parseInt(process.env.ROLLOUT_START_HOUR || "16");
+  const tz = process.env.ROLLOUT_TIMEZONE || "Asia/Kolkata";
+
+  const now = new Date();
+
+  const istNow = new Date(
+    now.toLocaleString("en-US", { timeZone: tz })
+  );
+
+  istNow.setHours(rolloutHour, 0, 0, 0);
+
+  // Convert IST time back to UTC
+  const utcTime = new Date(
+    istNow.toLocaleString("en-US", { timeZone: "UTC" })
+  );
+
+  return utcTime.toISOString();
+}
+
+
 /* =========================
    FETCH INBOX
 ========================= */
 export async function fetchInboxEmails() {
   const client = await networkLimit(() => getGraphClient());
-  const since = get24HoursAgoUTC();
-
+const since = process.env.ROLLOUT_MODE === "true"
+  ? getRolloutSinceUTC()
+  : get24HoursAgoUTC();
+  
   const filterQuery = `
     receivedDateTime ge ${since}
     and not(categories/any(c:c eq 'H8-QUEUED'))
@@ -130,7 +153,18 @@ export async function tagMessage(messageId, tag) {
       );
 
       return;
+
     } catch (err) {
+
+      if (err.statusCode === 404) {
+        writeLog({
+          level: "warn",
+          type: "TAG_SKIPPED_NOT_FOUND",
+          messageId
+        });
+        return;
+      }
+
       if (
         err.message?.includes("change key") &&
         attempt < MAX_RETRIES
@@ -145,10 +179,11 @@ export async function tagMessage(messageId, tag) {
         error: err.message
       });
 
-      throw err;
+      return; // Never crash worker
     }
   }
 }
+
 
 /* =========================
    REPLY SAME THREAD

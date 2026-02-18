@@ -13,15 +13,15 @@ import { extractCircuitId } from "./gpt/classify.js"; // export it
 import {
   tagMessage,
   replyToMessage,
-  createDraftReply
+  createDraftReply,
+  sendNewMail
 } from "./outlook.js";
 
-// import { logHistory } from "./utils/historyLogger.js";
 import { withRetry } from "./utils/retry.js";
 import { writeLog } from "./utils/logger.js";
 
 import {
-  ticketFailureTemplate
+  ticketFailureTemplate, ticketSuccessTemplate
 } from "./utils/emailTemplates.js";
 
 import { ackSuccessTemplate } from "./utils/clientAckTemplates.js";
@@ -260,6 +260,7 @@ async function handleJob(job) {
         timeZone: "Asia/Kolkata"
       })
     });
+    
 
     if (AUTO_SEND) {
       await replyToMessage(job.id, ack.html);
@@ -268,6 +269,30 @@ async function handleJob(job) {
       await createDraftReply(job.id, ack.html);
       writeLog({ level: "info", type: "DRAFT_CREATED", ticketId });
     }
+
+
+
+/* ================= INTERNAL SUCCESS NOTIFY ================= */
+
+if (process.env.SUCCESS_NOTIFY) {
+  const successTemplate = ticketSuccessTemplate({
+    ticketId,
+    circuitId: result.circuitId
+  });
+
+  await sendNewMail({
+    to: process.env.SUCCESS_NOTIFY,
+    subject: successTemplate.subject,
+    html: successTemplate.html
+  });
+
+  writeLog({
+    level: "info",
+    type: "SUCCESS_NOTIFICATION_SENT",
+    ticketId
+  });
+}
+
 
     /* ================= AUTO SCALE UP ================= */
 

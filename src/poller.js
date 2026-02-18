@@ -31,31 +31,32 @@ export async function pollInbox() {
 
     let enqueuedCount = 0;
 
-    for (const mail of emails) {
-      try {
-        enqueue(mail);
+for (const mail of emails) {
+  try {
 
-        await tagMessage(mail.id, "H8-QUEUED");
+    await tagMessage(mail.id, "H8-QUEUED");
 
-        enqueuedCount++;
+    enqueue(mail);
 
-        writeLog({
-          level: "info",
-          type: "MAIL_ENQUEUED",
-          messageId: mail.id,
-          subject: mail.subject,
-          from: mail.from?.emailAddress?.address || "unknown"
-        });
+    enqueuedCount++;
 
-      } catch (err) {
-        writeLog({
-          level: "error",
-          type: "MAIL_ENQUEUE_FAILED",
-          messageId: mail.id,
-          error: err.message
-        });
-      }
-    }
+    writeLog({
+      level: "info",
+      type: "MAIL_ENQUEUED",
+      messageId: mail.id,
+      subject: mail.subject,
+      from: mail.from?.emailAddress?.address || "unknown"
+    });
+
+  } catch (err) {
+    writeLog({
+      level: "error",
+      type: "MAIL_ENQUEUE_FAILED",
+      messageId: mail.id,
+      error: err.message
+    });
+  }
+}
 
     writeLog({
       level: "info",
