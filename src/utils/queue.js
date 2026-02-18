@@ -5,62 +5,77 @@ const DATA_DIR = path.resolve("data");
 const FILE = path.join(DATA_DIR, "queue.json");
 const TEMP_FILE = FILE + ".tmp";
 
-let isSaving = false; // 🔒 write lock
+let isSaving = false;
 
+// Ensure data directory exists
 if (!fs.existsSync(DATA_DIR)) {
   fs.mkdirSync(DATA_DIR, { recursive: true });
 }
 
 /* =========================
-   SAFE READ
+   ENSURE FILE EXISTS
+========================= */
+function ensureFile() {
+  if (!fs.existsSync(FILE)) {
+    fs.writeFileSync(FILE, "[]", "utf8");
+  }
+}
+
+/* =========================
+   SAFE READ (SELF HEALING)
 ========================= */
 function readQueue() {
   try {
-    if (!fs.existsSync(FILE)) return [];
+    ensureFile();
 
     const raw = fs.readFileSync(FILE, "utf8");
-    if (!raw.trim()) return [];
 
-    return JSON.parse(raw);
-  } catch (err) {
-    console.error("⚠ Queue file corrupted. Resetting...", err.message);
+    if (!raw || !raw.trim()) {
+      fs.writeFileSync(FILE, "[]", "utf8");
+      return [];
+    }
+
+    const parsed = JSON.parse(raw);
+
+    if (!Array.isArray(parsed)) {
+      fs.writeFileSync(FILE, "[]", "utf8");
+      return [];
+    }
+
+    return parsed;
+
+  } catch {
+    try {
+      fs.writeFileSync(FILE, "[]", "utf8");
+    } catch (_) {}
     return [];
   }
 }
 
 /* =========================
-   SAFE WRITE (WINDOWS SAFE)
+   SAFE WRITE (ATOMIC)
 ========================= */
 function saveQueue(queue) {
-  if (isSaving) {
-    console.warn("⚠ Queue write skipped (already saving)");
-    return;
-  }
-
+  if (isSaving) return;
   isSaving = true;
 
   try {
-    // Write temp file first
-    fs.writeFileSync(TEMP_FILE, JSON.stringify(queue, null, 2), "utf8");
+    const data = JSON.stringify(queue, null, 2);
 
-    // If target exists, delete first (Windows-safe)
+    fs.writeFileSync(TEMP_FILE, data, "utf8");
+
     if (fs.existsSync(FILE)) {
       fs.unlinkSync(FILE);
     }
 
-    // Rename temp to final
     fs.renameSync(TEMP_FILE, FILE);
 
-  } catch (err) {
-    console.error("❌ Queue save failed:", err.message);
-
-    // Clean up temp file if exists
+  } catch {
     try {
       if (fs.existsSync(TEMP_FILE)) {
         fs.unlinkSync(TEMP_FILE);
       }
     } catch (_) {}
-
   } finally {
     isSaving = false;
   }
@@ -73,8 +88,7 @@ export function enqueue(mail) {
   try {
     const queue = readQueue();
 
-    const exists = queue.find(q => q.id === mail.id);
-    if (exists) return;
+    if (queue.some(q => q.id === mail.id)) return;
 
     queue.push({
       ...mail,
@@ -83,9 +97,7 @@ export function enqueue(mail) {
     });
 
     saveQueue(queue);
-  } catch (err) {
-    console.error("❌ ENQUEUE FAILED:", err.message);
-  }
+  } catch {}
 }
 
 /* =========================
@@ -100,23 +112,20 @@ export function dequeue() {
     saveQueue(queue);
 
     return job;
-  } catch (err) {
-    console.error("❌ DEQUEUE FAILED:", err.message);
+  } catch {
     return null;
   }
 }
 
 /* =========================
-   REMOVE SPECIFIC
+   REMOVE BY ID
 ========================= */
 export function removeById(id) {
   try {
     const queue = readQueue();
     const filtered = queue.filter(q => q.id !== id);
     saveQueue(filtered);
-  } catch (err) {
-    console.error("❌ REMOVE FAILED:", err.message);
-  }
+  } catch {}
 }
 
 /* =========================
@@ -131,9 +140,7 @@ export function incrementAttempt(id) {
       item.attempts = (item.attempts || 0) + 1;
       saveQueue(queue);
     }
-  } catch (err) {
-    console.error("❌ INCREMENT FAILED:", err.message);
-  }
+  } catch {}
 }
 
 /* =========================
@@ -143,14 +150,13 @@ export function peek() {
   try {
     const queue = readQueue();
     return queue.length ? queue[0] : null;
-  } catch (err) {
-    console.error("❌ PEEK FAILED:", err.message);
+  } catch {
     return null;
   }
 }
 
 /* =========================
-   GET LENGTH
+   LENGTH
 ========================= */
 export function getQueueLength() {
   try {
@@ -161,12 +167,10 @@ export function getQueueLength() {
 }
 
 /* =========================
-   CLEAR QUEUE
+   CLEAR
 ========================= */
 export function clearQueue() {
   try {
     saveQueue([]);
-  } catch (err) {
-    console.error("❌ CLEAR QUEUE FAILED:", err.message);
-  }
+  } catch {}
 }

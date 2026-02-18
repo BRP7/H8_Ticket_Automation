@@ -27,7 +27,7 @@ export async function withRetry(fn, options = {}) {
         maxDelayMs
       );
 
-      console.log(`🔁 Retry ${attempt}/${retries} in ${delay}ms`);
+      console.log(`Retry ${attempt}/${retries} in ${delay}ms`);
       onRetry(err, attempt);
 
       await new Promise(res => setTimeout(res, delay));

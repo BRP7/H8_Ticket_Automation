@@ -79,51 +79,23 @@ export async function fetchInboxEmails() {
     }
   }
 
-  const uniqueMessages = Array.from(latestByConversation.values());
+const uniqueMessages = Array.from(latestByConversation.values());
 
-  /* ===============================
-     LOAD SKIP SENDERS FROM ENV
-  =============================== */
+return uniqueMessages.map((m) => {
+  const rawBody = m.body?.content || m.bodyPreview || "";
 
-  const SKIP_SENDERS = (process.env.SKIP_SENDERS || "")
-    .split(",")
-    .map((s) => s.trim().toLowerCase())
-    .filter(Boolean);
-
-  /* ===============================
-     FILTER SYSTEM / BOT EMAILS
-  =============================== */
-
-  const filteredMessages = uniqueMessages.filter((m) => {
-    const sender = m.from?.emailAddress?.address?.toLowerCase() || "";
-
-    // Skip configured bot senders
-    if (SKIP_SENDERS.some((s) => sender.includes(s))) {
-      return false;
-    }
-
-    return true;
-  });
-
-  /* ===============================
-     MAP TO INTERNAL FORMAT
-  =============================== */
-
-  return filteredMessages.map((m) => {
-    const rawBody = m.body?.content || m.bodyPreview || "";
-
-    return {
-      id: m.id,
-      conversationId: m.conversationId,
-      subject: m.subject,
-      from: m.from,
-      receivedDateTime: m.receivedDateTime,
-      categories: m.categories || [],
-      bodyText: sanitizeForAspNet(
-        extractLatestMessage(rawBody)
-      )
-    };
-  });
+  return {
+    id: m.id,
+    conversationId: m.conversationId,
+    subject: m.subject,
+    from: m.from,
+    receivedDateTime: m.receivedDateTime,
+    categories: m.categories || [],
+    bodyText: sanitizeForAspNet(
+      extractLatestMessage(rawBody)
+    )
+  };
+});
 }
 
 

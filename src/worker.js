@@ -16,7 +16,7 @@ import {
   createDraftReply
 } from "./outlook.js";
 
-import { logHistory } from "./utils/historyLogger.js";
+// import { logHistory } from "./utils/historyLogger.js";
 import { withRetry } from "./utils/retry.js";
 import { writeLog } from "./utils/logger.js";
 
@@ -163,7 +163,16 @@ async function handleJob(job) {
 
     if (!result.isIssue || !result.subSubCategory) {
       await tagMessage(job.id, TAGS.OTHER);
-      await logHistory(job, result, "NOT_ISSUE");
+      // await logHistory(job, result, "NOT_ISSUE");
+
+      writeLog({
+        level: "info",
+        type: "NOT_ISSUE",
+        subject: job.subject,
+        from: clientEmail,
+        circuitId: result.circuitId || null
+      });
+
       removeById(job.id);
       return;
     }
@@ -269,7 +278,7 @@ async function handleJob(job) {
       dynamicConcurrency++;
     }
 
-    await logHistory(job, result, "TICKET_CREATED");
+    // await logHistory(job, result, "TICKET_CREATED");
     removeById(job.id);
 
   } catch (err) {
